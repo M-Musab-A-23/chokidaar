@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from ml import predict as predict_module
-from proxy.decisions import Decision, record
+from proxy.decisions import Decision, ensure_visible, record
 from tests.proxy_fakes import benign, malicious, proxy_client
 
 pytestmark = pytest.mark.anyio
@@ -94,6 +94,18 @@ def test_decisions_are_logged_as_json(caplog):
                     label="benign", score=0.1))
     (entry,) = caplog.records
     assert json.loads(entry.getMessage())["action"] == "allowed"
+
+
+def test_decisions_are_visible_when_logging_is_unconfigured(monkeypatch, capsys):
+    # As under uvicorn: no root handlers, nothing set on the chokidaar loggers.
+    base = logging.getLogger("chokidaar")
+    monkeypatch.setattr(logging.getLogger(), "handlers", [])
+    monkeypatch.setattr(base, "handlers", [])
+    monkeypatch.setattr(base, "level", logging.NOTSET)
+    ensure_visible()
+    assert base.handlers  # stderr handler bound now, while capsys is active
+    record(Decision(method="GET", path="/x", query="", mode="monitor", action="flagged"))
+    assert '"action": "flagged"' in capsys.readouterr().err
 
 
 @pytest.fixture

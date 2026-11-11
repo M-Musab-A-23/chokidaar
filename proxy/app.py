@@ -16,7 +16,7 @@ from starlette.routing import request_response
 
 from ml import predict as ml_predict
 from proxy.config import Settings, from_env
-from proxy.decisions import Decision, record
+from proxy.decisions import Decision, ensure_visible, record
 from proxy.extract import to_ml_request
 from proxy.reason import explain
 
@@ -122,7 +122,9 @@ def create_app(settings: Settings = None, transport: httpx.AsyncBaseTransport = 
     """`predictor` defaults to ml.predict.predict and `recorder` to
     proxy.decisions.record; both can be swapped out in tests."""
     settings = settings or from_env()
-    recorder = recorder or record
+    if recorder is None:
+        recorder = record
+        ensure_visible()
     client = httpx.AsyncClient(
         transport=transport, timeout=UPSTREAM_TIMEOUT, follow_redirects=False
     )
