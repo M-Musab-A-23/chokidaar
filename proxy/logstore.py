@@ -114,6 +114,14 @@ class LogStore:
                 " GROUP BY ip ORDER BY blocks DESC, ip LIMIT ?", (max(0, int(limit)),))
             return [(r["ip"], r["blocks"]) for r in rows]
 
+    def blocked_and_flagged(self, limit: int = 200) -> list:
+        """The newest blocked or flagged requests first, as dicts."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM requests WHERE decision IN ('block', 'flagged')"
+                " ORDER BY id DESC LIMIT ?", (max(0, int(limit)),))
+            return [dict(r) for r in rows]
+
 
 def body_hash(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
