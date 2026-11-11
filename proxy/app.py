@@ -118,10 +118,12 @@ def _check(predictor, settings: Settings, ml_request: dict):
     label, score = result["label"], float(result["score"])
     if label != "malicious":
         return Decision(**base, action="allowed", label=label, score=score), None
-    reason = explain(result.get("top_features") or [])
+    top_features = result.get("top_features") or []
     if settings.mode == "block":
+        reason = explain(top_features)
         return Decision(**base, action="blocked", label=label, score=score, reason=reason), \
             _blocked(reason)
+    reason = explain(top_features, flagged=True)
     return Decision(**base, action="flagged", label=label, score=score, reason=reason), None
 
 
