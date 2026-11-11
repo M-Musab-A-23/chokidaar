@@ -17,5 +17,21 @@ services:
     ports:
       - "8080:8080"
 
+  # Admin UI on the same log volume. It exits at once if ADMIN_TOKEN is unset.
+  # Published on localhost only; put it behind TLS before exposing it further.
+  dashboard:
+    build: .
+    command: ["python", "-m", "dashboard", "--host", "0.0.0.0"]
+    depends_on:
+      - chokidaar
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      DASHBOARD_PORT: "8081"
+      LOG_DB: /data/chokidaar.db
+    volumes:
+      - chokidaar-data:/data
+    ports:
+      - "127.0.0.1:8081:8081"
+
 volumes:
   chokidaar-data:
