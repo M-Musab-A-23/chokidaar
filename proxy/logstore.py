@@ -122,6 +122,32 @@ class LogStore:
                 " ORDER BY id DESC LIMIT ?", (max(0, int(limit)),))
             return [dict(r) for r in rows]
 
+    def add_proposal(self, *, pattern: str, attack_type: str, rationale: str = ""):
+        """Store a pending rule proposal and return its id, or None if the same
+        pattern was already proposed for the same attack type (whatever its
+        status, so a rejected rule is not proposed again)."""
+        with self.connect() as conn:
+            if conn.execute("SELECT 1 FROM rule_proposals WHERE pattern = ? AND attack_type = ?",
+                            (pattern, attack_type)).fetchone():
+                return None
+            cursor = conn.execute(
+                "INSERT INTO rule_proposals (pattern, attack_type, rationale) VALUES (?, ?, ?)",
+                (pattern, attack_type, rationale))
+            return cursor.lastrowid
+
+    def proposals(self, status: str = None) -> list:
+        """Rule proposals in the order they were made, optionally only those
+        with one status."""
+        if status is not None and status not in PROPOSAL_STATUSES:
+            raise ValueError(f"status must be one of {', '.join(PROPOSAL_STATUSES)}, got {status!r}")
+        with self.connect() as conn:
+            if status is None:
+                rows = conn.execute("SELECT * FROM rule_proposals ORDER BY id")
+            else:
+                rows = conn.execute("SELECT * FROM rule_proposals WHERE status = ? ORDER BY id",
+                                    (status,))
+            return [dict(r) for r in rows]
+
 
 def body_hash(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()

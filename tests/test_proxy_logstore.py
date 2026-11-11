@@ -156,3 +156,25 @@ def test_blocked_and_flagged_skips_allowed_and_is_newest_first(store):
     assert [r["path"] for r in store.blocked_and_flagged()] == ["/3", "/2", "/0"]
     assert [r["path"] for r in store.blocked_and_flagged(limit=2)] == ["/3", "/2"]
     assert store.blocked_and_flagged(limit=0) == []
+
+
+def test_add_proposal_stores_a_pending_row(store):
+    new_id = store.add_proposal(pattern=r"\bsleep\s*\(", attack_type="sqli", rationale="timing")
+    assert store.proposals() == [{"id": new_id, "pattern": r"\bsleep\s*\(",
+                                  "attack_type": "sqli", "rationale": "timing",
+                                  "status": "pending"}]
+
+
+def test_add_proposal_skips_duplicates(store):
+    assert store.add_proposal(pattern="abcd", attack_type="xss") is not None
+    assert store.add_proposal(pattern="abcd", attack_type="xss", rationale="again") is None
+    assert store.add_proposal(pattern="abcd", attack_type="cmdi") is not None
+    assert len(store.proposals()) == 2
+
+
+def test_proposals_filters_by_status(store):
+    store.add_proposal(pattern="abcd", attack_type="xss")
+    assert len(store.proposals("pending")) == 1
+    assert store.proposals("approved") == []
+    with pytest.raises(ValueError):
+        store.proposals("maybe")
