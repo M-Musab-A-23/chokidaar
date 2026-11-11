@@ -14,6 +14,7 @@ UPSTREAM_URL=http://127.0.0.1:8000 MODE=block \
 | `UPSTREAM_URL` | Required. The app to protect, e.g. `http://127.0.0.1:8000`. |
 | `MODE` | `block` (default): malicious requests get `403` with a plain-language reason and never reach the app. `monitor`: everything is forwarded and the decision is only recorded. |
 | `CHOKIDAAR_MODEL` | Optional model path (see `ml/README.md`). |
+| `LOG_DB` | SQLite request log, default `logs/chokidaar.db`. The directory is created if needed. |
 
 `--no-server-header --no-date-header` stop uvicorn adding its own `server` and `date` headers next to the ones from the app, so responses reach the client exactly as the app sent them.
 
@@ -21,7 +22,7 @@ UPSTREAM_URL=http://127.0.0.1:8000 MODE=block \
 
 1. The method, raw path, raw query, headers and the first 64 KiB of the body are checked against the signature rules in `proxy/rules.py` (SQL injection, XSS, path traversal, command injection). Each part is checked as sent, after each of up to three rounds of URL decoding, and with HTML entities decoded. On a hit the rule decides (label `malicious`, score `1.0`) and the classifier is not called.
 2. Otherwise the same parts go to `ml.predict.predict()`.
-3. The decision is recorded as one JSON line on the `chokidaar.decisions` logger (action `allowed`, `blocked`, `flagged` or `error`, with label, score, reason and the id of the rule that matched, if any).
+3. The decision is recorded as one JSON line on the `chokidaar.decisions` logger (action `allowed`, `blocked`, `flagged` or `error`, with label, score, reason and the id of the rule that matched, if any), and as one row in the request log (see below).
 4. In block mode a malicious request is answered with `403`, `text/plain`. Otherwise the request is forwarded unchanged (apart from hop-by-hop headers and `Host`), and the app's status, headers and raw body are returned as they are. Redirects are not followed.
 
 If the app cannot be reached the proxy answers `502` (`504` on timeout). If the classifier itself fails, monitor mode still forwards the request and block mode answers `503`.
@@ -31,3 +32,23 @@ Bodies are buffered in memory on the way in and out, so very large uploads and d
 ## Rules
 
 Each rule in `proxy.rules.RULES` has an `id`, an `attack_type`, a case-insensitive `regex` and a `description` used in the block reason, which names the attack, the part of the request it was found in and the matching text. `proxy.rules.scan(request)` returns every matching rule; the proxy uses the first. `tests/attacks/payloads.json` holds malicious and benign payloads for each attack type; every malicious one must hit a rule of its type and no benign one may hit any rule.
+
+## Request log
+
+`proxy/logstore.py` keeps one row per request in the `requests` table of the `LOG_DB` database:
+
+| Column | Meaning |
+| --- | --- |
+| `id`, `ts` | Row id and UTC time (ISO 8601). |
+| `ip` | The client address of the connection. `X-Forwarded-For` is not trusted. |
+| `method`, `path`, `query` | As received; path and query stay URL-encoded. |
+| `body_hash` | SHA-256 of the full body. The body itself is never stored. |
+| `decision` | `allow`, `block` or `flagged` (malicious but let through in monitor mode). A request the classifier could not check is stored as what happened to it: `block` in block mode, `allow` in monitor mode, with no `ml_score`. |
+| `rule_id` | The rule that matched; empty when the classifier decided. |
+| `ml_score`, `reason` | Classifier score and the plain-language reason. |
+
+The same database holds `rule_proposals` (`pattern`, `attack_type`, `rationale`, `status` = `pending`, `approved` or `rejected`) for the admin to review.
+
+The row is written after the decision and before the request is forwarded. If writing fails (disk full, bad path, locked database) the error is logged on `chokidaar.proxy` and the request carries on as if nothing happened.
+
+`LogStore` also has read helpers for the dashboard: `recent(limit)`, `counts()` (requests per decision) and `top_blocked_ips(limit)`.
