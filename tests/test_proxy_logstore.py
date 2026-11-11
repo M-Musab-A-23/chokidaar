@@ -127,6 +127,22 @@ def test_recent_on_an_empty_log(store):
     assert store.recent(10) == []
 
 
+def test_recent_filters_by_decision_and_ip(store):
+    _add(store, "allow", "198.51.100.1", "/a")
+    _add(store, "block", "198.51.100.1", "/b")
+    _add(store, "block", "203.0.113.9", "/c")
+    _add(store, "flagged", "203.0.113.9", "/d")
+    assert [r["path"] for r in store.recent(decision="block")] == ["/c", "/b"]
+    assert [r["path"] for r in store.recent(ip="203.0.113.9")] == ["/d", "/c"]
+    assert [r["path"] for r in store.recent(decision="block", ip="198.51.100.1")] == ["/b"]
+    assert [r["path"] for r in store.recent(1, decision="block")] == ["/c"]
+
+
+def test_recent_refuses_an_unknown_decision(store):
+    with pytest.raises(ValueError, match="decision must be one of"):
+        store.recent(decision="blocked")
+
+
 def test_counts_by_decision(store):
     assert store.counts() == {"allow": 0, "block": 0, "flagged": 0}
     for decision in ("allow", "allow", "block", "flagged", "allow"):
