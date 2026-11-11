@@ -13,17 +13,29 @@ def store(tmp_path):
     return LogStore(str(tmp_path / "requests.db"))
 
 
+# No signature rule matches this, so the decision comes from the classifier.
+MODEL_ONLY_PATH = "/files/....//....//config.yml"
+
+
 async def test_blocked_request_is_logged_with_its_reason(store):
-    async with proxy_client("block", predictor=malicious, store=store) as c:
-        r = await c.post("/login?next=%2F", content=b"user=' or 1=1 --")
+    asked = []
+
+    def spy(request):
+        asked.append(request)
+        return malicious(request)
+
+    async with proxy_client("block", predictor=spy, store=store) as c:
+        r = await c.post(MODEL_ONLY_PATH + "?next=%2F", content=b"user=jo")
+    assert len(asked) == 1, "the classifier should decide, not a rule"
+    assert r.status_code == 403
     (row,) = store.recent()
     assert (row["method"], row["path"], row["query"], row["decision"]) == (
-        "POST", "/login", "next=%2F", "block")
+        "POST", MODEL_ONLY_PATH, "next=%2F", "block")
     assert row["ip"] == "127.0.0.1"
     assert row["ml_score"] == 0.97
     assert row["reason"] == r.text
     assert row["rule_id"] is None
-    assert row["body_hash"] == hashlib.sha256(b"user=' or 1=1 --").hexdigest()
+    assert row["body_hash"] == hashlib.sha256(b"user=jo").hexdigest()
 
 
 async def test_flagged_request_is_logged_as_flagged(store):
