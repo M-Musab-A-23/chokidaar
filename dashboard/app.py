@@ -93,4 +93,25 @@ def create_app(store: LogStore = None, token: str = None, clock=_utcnow) -> Fast
                           "requests": requests_, "blocks": blocks})
         return hours
 
+    @app.get("/api/suggestions", dependencies=[api])
+    def suggestions(status: Optional[Literal["pending", "approved", "rejected"]] = None):
+        return store.proposals(status)
+
+    def set_status(proposal_id: int, change) -> dict:
+        try:
+            change(proposal_id)
+        except KeyError:
+            raise HTTPException(404, f"no rule proposal with id {proposal_id}")
+        (row,) = [p for p in store.proposals() if p["id"] == proposal_id]
+        return row
+
+    @app.post("/api/suggestions/{proposal_id}/approve", dependencies=[api])
+    def approve(proposal_id: int):
+        """The proxy loads approved rules on its next start."""
+        return set_status(proposal_id, store.approve)
+
+    @app.post("/api/suggestions/{proposal_id}/reject", dependencies=[api])
+    def reject(proposal_id: int):
+        return set_status(proposal_id, store.reject)
+
     return app

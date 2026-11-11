@@ -149,3 +149,46 @@ async def test_timeline_has_24_hours_ending_with_the_current_one(store):
     assert hours[0] == {"hour": "2026-11-10T11:00:00Z", "requests": 2, "blocks": 1}
     assert hours[-1] == {"hour": "2026-11-11T10:00:00Z", "requests": 2, "blocks": 1}
     assert all(h == {"hour": h["hour"], "requests": 0, "blocks": 0} for h in hours[1:-1])
+
+
+# --- suggestions ---
+
+def propose(store, pattern, attack_type="sqli"):
+    return store.add_proposal(pattern=pattern, attack_type=attack_type, rationale="seen 12 times")
+
+
+async def test_suggestions_list_and_filter_by_status(client, store):
+    first = propose(store, r"union\s+select")
+    propose(store, r"<svg[^>]*onload", "xss")
+    store.reject(first)
+    r = await client.get("/api/suggestions", headers=AUTH)
+    assert [p["pattern"] for p in r.json()] == [r"union\s+select", r"<svg[^>]*onload"]
+    r = await client.get("/api/suggestions", params={"status": "pending"}, headers=AUTH)
+    assert [(p["pattern"], p["attack_type"], p["rationale"], p["status"]) for p in r.json()] == [
+        (r"<svg[^>]*onload", "xss", "seen 12 times", "pending")]
+    r = await client.get("/api/suggestions", params={"status": "maybe"}, headers=AUTH)
+    assert r.status_code == 422
+
+
+@pytest.mark.parametrize("action, status", [("approve", "approved"), ("reject", "rejected")])
+async def test_approve_and_reject_change_the_status(client, store, action, status):
+    pid = propose(store, r"\.\./\.\./")
+    r = await client.post(f"/api/suggestions/{pid}/{action}", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["status"] == status
+    assert store.proposals(status)[0]["id"] == pid
+    assert store.proposals("pending") == []
+
+
+@pytest.mark.parametrize("action", ["approve", "reject"])
+async def test_approve_or_reject_an_unknown_id_is_404(client, action):
+    r = await client.post(f"/api/suggestions/999/{action}", headers=AUTH)
+    assert r.status_code == 404
+
+
+@pytest.mark.parametrize("action", ["approve", "reject"])
+async def test_approve_and_reject_need_the_token(client, store, action):
+    pid = propose(store, r"\.\./\.\./")
+    r = await client.post(f"/api/suggestions/{pid}/{action}")
+    assert r.status_code == 401
+    assert store.proposals()[0]["status"] == "pending"
