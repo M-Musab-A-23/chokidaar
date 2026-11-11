@@ -1,16 +1,26 @@
-"""The reverse proxy: every request is forwarded to UPSTREAM_URL and the
-upstream response is passed back unchanged.
+"""The reverse proxy: every request is checked by the classifier, then either
+refused with a plain-language reason (MODE=block) or forwarded to UPSTREAM_URL,
+whose response is passed back unchanged. MODE=monitor forwards everything and
+only records what it would have done.
 
 Run with: uvicorn proxy.app:create_app --factory
 """
+import logging
 from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import PlainTextResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.routing import request_response
 
+from ml import predict as ml_predict
 from proxy.config import Settings, from_env
+from proxy.decisions import Decision, record
+from proxy.extract import to_ml_request
+from proxy.reason import explain
+
+logger = logging.getLogger("chokidaar.proxy")
 
 # Headers that describe one connection, not the message; they are never forwarded
 # (RFC 9110, section 7.6.1). Host is rewritten by the client for the upstream.
@@ -19,6 +29,7 @@ HOP_BY_HOP = {
     "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade",
 }
 UPSTREAM_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+WARM_UP_REQUEST = {"method": "GET", "path": "/", "query": "", "headers": {}, "body": ""}
 
 
 def _hop_by_hop(headers: list) -> set:
@@ -73,14 +84,55 @@ def _pass_through(upstream_response: httpx.Response, content: bytes, method: str
     return response
 
 
-def create_app(settings: Settings = None, transport: httpx.AsyncBaseTransport = None) -> FastAPI:
+def _blocked(reason: str) -> Response:
+    # text/plain plus nosniff: the reason quotes parts of the request and must
+    # never be rendered as HTML.
+    return PlainTextResponse(
+        reason, status_code=403, headers={"x-content-type-options": "nosniff"}
+    )
+
+
+def _check(predictor, settings: Settings, ml_request: dict):
+    """Returns (decision, response to send instead of forwarding, or None)."""
+    base = dict(method=ml_request["method"], path=ml_request["path"],
+                query=ml_request["query"], mode=settings.mode)
+    try:
+        result = predictor(ml_request)
+    except Exception:
+        logger.exception("classifier failed on %s %s", base["method"], base["path"])
+        decision = Decision(**base, action="error")
+        if settings.mode == "block":
+            return decision, PlainTextResponse(
+                "This request could not be checked, so it was not let through. "
+                "Please try again later.", status_code=503,
+            )
+        return decision, None
+    label, score = result["label"], float(result["score"])
+    if label != "malicious":
+        return Decision(**base, action="allowed", label=label, score=score), None
+    reason = explain(result.get("top_features") or [])
+    if settings.mode == "block":
+        return Decision(**base, action="blocked", label=label, score=score, reason=reason), \
+            _blocked(reason)
+    return Decision(**base, action="flagged", label=label, score=score, reason=reason), None
+
+
+def create_app(settings: Settings = None, transport: httpx.AsyncBaseTransport = None,
+               predictor=None, recorder=None) -> FastAPI:
+    """`predictor` defaults to ml.predict.predict and `recorder` to
+    proxy.decisions.record; both can be swapped out in tests."""
     settings = settings or from_env()
+    recorder = recorder or record
     client = httpx.AsyncClient(
         transport=transport, timeout=UPSTREAM_TIMEOUT, follow_redirects=False
     )
 
     @asynccontextmanager
     async def lifespan(_app):
+        if predictor is None:
+            # Load (or train) the model before the first request, not during it.
+            # predict() loads it only if it is not loaded already.
+            await run_in_threadpool(ml_predict.predict, WARM_UP_REQUEST)
         yield
         await client.aclose()
 
@@ -90,6 +142,16 @@ def create_app(settings: Settings = None, transport: httpx.AsyncBaseTransport = 
 
     async def proxy(request: Request) -> Response:
         body = await request.body()
+        ml_request = to_ml_request(request.method, _raw_path(request),
+                                   request.scope.get("query_string", b""),
+                                   request.headers.raw, body)
+        # The classifier is CPU-bound and synchronous; keep it off the event loop.
+        decision, refusal = await run_in_threadpool(
+            _check, predictor or ml_predict.predict, settings, ml_request
+        )
+        recorder(decision)
+        if refusal is not None:
+            return refusal
         return await _forward(client, settings.upstream_url, request, body)
 
     # Mounted as a plain ASGI app so it receives every path and every HTTP method

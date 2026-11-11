@@ -51,10 +51,21 @@ def fake_upstream() -> FastAPI:
     return app
 
 
+def benign(_request: dict) -> dict:
+    return {"score": 0.01, "label": "benign", "top_features": []}
+
+
+def malicious(_request: dict) -> dict:
+    return {"score": 0.97, "label": "malicious",
+            "top_features": ["sql keyword pattern", 'fragment "or 1=1"']}
+
+
 @asynccontextmanager
 async def proxy_client(mode: str = "block", transport: httpx.AsyncBaseTransport = None,
-                       **kwargs):
-    """An httpx client talking to the proxy, which talks to the fake upstream."""
+                       predictor=benign, **kwargs):
+    """An httpx client talking to the proxy, which talks to the fake upstream.
+    Pass predictor=None to use the real classifier."""
+    kwargs["predictor"] = predictor
     transport = transport or httpx.ASGITransport(app=fake_upstream())
     app = create_app(Settings(upstream_url=UPSTREAM, mode=mode), transport=transport, **kwargs)
     async with app.router.lifespan_context(app):
