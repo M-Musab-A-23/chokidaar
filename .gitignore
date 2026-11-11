@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Chokidaar
+.env
+*.db
+logs/
+data/raw/
+models/*.pkl
+models/*.joblib
+node_modules/
