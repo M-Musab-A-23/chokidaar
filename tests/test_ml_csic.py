@@ -44,3 +44,11 @@ def test_split_is_repeatable_and_keeps_halves_apart(folder):
 def test_without_headers_keeps_the_rest():
     r = {"method": "GET", "path": "/", "query": "a=1", "headers": {"Cookie": "x"}, "body": ""}
     assert without_headers([r]) == [dict(r, headers={})]
+
+
+def test_train_can_add_the_csic_training_part(folder):
+    from ml.train import train
+
+    model = train(n=200, csic_dir=str(folder))
+    request = {"method": "GET", "path": "/tienda1/index.jsp", "query": "id='3", "headers": {}, "body": ""}
+    assert 0.0 <= float(model.predict_proba([request])[0]) <= 1.0
