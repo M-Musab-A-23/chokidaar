@@ -63,3 +63,21 @@ def test_sql_injection_variants_not_in_training_are_caught(query):
 ])
 def test_ordinary_words_that_look_like_sql_stay_benign(query):
     assert predict(req(query=query))["label"] == "benign"
+
+
+def test_threshold_defaults_to_half(monkeypatch):
+    monkeypatch.delenv("CHOKIDAAR_THRESHOLD", raising=False)
+    assert predict_module.threshold() == 0.5
+
+
+def test_threshold_can_be_raised(monkeypatch):
+    monkeypatch.setenv("CHOKIDAAR_THRESHOLD", "0.99999")
+    assert predict(req(query="id=1 or 1=1"))["score"] < 1.0
+    assert predict_module.threshold() == 0.99999
+
+
+@pytest.mark.parametrize("value", ["0", "1.5", "-1", "abc"])
+def test_bad_threshold_is_refused(monkeypatch, value):
+    monkeypatch.setenv("CHOKIDAAR_THRESHOLD", value)
+    with pytest.raises(ValueError):
+        predict_module.threshold()
