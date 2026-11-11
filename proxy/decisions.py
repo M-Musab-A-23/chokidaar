@@ -8,6 +8,7 @@ logger = logging.getLogger("chokidaar.decisions")
 # allowed: benign, forwarded.  blocked: malicious, refused with 403 (block mode).
 # flagged: malicious, forwarded anyway (monitor mode).
 # error:   the classifier failed; forwarded in monitor mode, refused in block mode.
+# `rule` is the id of the signature rule that decided, or "" when the classifier did.
 ACTIONS = ("allowed", "blocked", "flagged", "error")
 
 
@@ -21,6 +22,7 @@ class Decision:
     label: str = ""
     score: float = 0.0
     reason: str = ""
+    rule: str = ""
 
 
 def record(decision: Decision) -> None:
