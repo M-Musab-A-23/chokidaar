@@ -7,11 +7,14 @@ payloads are exposed) and after HTML entity decoding. A hit is reported with
 the rule id and a sentence a site visitor or admin can understand.
 """
 import html
+import logging
 import re
 from dataclasses import dataclass
 from urllib.parse import unquote_plus
 
 DECODE_ROUNDS = 3
+CUSTOM_DESCRIPTION = "a pattern the site administrator added as an attack signature"
+logger = logging.getLogger("chokidaar.proxy")
 # Only this much of the matched text is quoted back in the reason.
 MAX_QUOTED = 60
 
@@ -201,3 +204,25 @@ def scan(request: dict, rules: list = None) -> list:
 def first_match(request: dict, rules: list = None):
     """The first matching rule, or None. Stops at the first hit."""
     return next(_matches(request, RULES if rules is None else rules), None)
+
+
+def custom_rules(store) -> list:
+    """The approved rule proposals in `store`, as rules with ids custom-<id>.
+
+    A proposal that no longer compiles or has an unknown attack type is
+    skipped with a warning, and a log that cannot be read gives no custom
+    rules, so a bad proposal or a broken log never stops the proxy."""
+    try:
+        approved = store.proposals("approved")
+    except Exception:
+        logger.exception("could not read approved rule proposals; using built-in rules only")
+        return []
+    rules = []
+    for proposal in approved:
+        rule_id = f"custom-{proposal['id']}"
+        try:
+            rules.append(Rule(rule_id, SHORT_TYPES[proposal["attack_type"]],
+                              proposal["pattern"], CUSTOM_DESCRIPTION))
+        except (KeyError, ValueError, re.error) as exc:
+            logger.warning("skipping rule %s: %r", rule_id, exc)
+    return rules
