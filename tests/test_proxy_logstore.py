@@ -148,3 +148,11 @@ def test_top_blocked_ips_breaks_ties_by_ip(store):
     for ip in ("10.0.0.9", "10.0.0.5"):
         _add(store, decision="block", ip=ip)
     assert store.top_blocked_ips() == [("10.0.0.5", 1), ("10.0.0.9", 1)]
+
+
+def test_blocked_and_flagged_skips_allowed_and_is_newest_first(store):
+    for i, decision in enumerate(["block", "allow", "flagged", "block", "allow"]):
+        _add(store, decision=decision, path=f"/{i}")
+    assert [r["path"] for r in store.blocked_and_flagged()] == ["/3", "/2", "/0"]
+    assert [r["path"] for r in store.blocked_and_flagged(limit=2)] == ["/3", "/2"]
+    assert store.blocked_and_flagged(limit=0) == []
