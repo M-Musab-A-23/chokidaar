@@ -38,6 +38,19 @@ async def test_blocked_request_is_logged_with_its_reason(store):
     assert row["body_hash"] == hashlib.sha256(b"user=jo").hexdigest()
 
 
+async def test_rule_hit_is_logged_with_its_rule_id(store):
+    def must_not_be_asked(_request):
+        raise AssertionError("a rule hit should not reach the classifier")
+
+    async with proxy_client("block", predictor=must_not_be_asked, store=store) as c:
+        r = await c.post("/login?next=%2F", content=b"user=' or 1=1 --")
+    assert r.status_code == 403
+    (row,) = store.recent()
+    assert (row["decision"], row["rule_id"]) == ("block", "sqli-tautology")
+    assert (row["method"], row["path"], row["query"]) == ("POST", "/login", "next=%2F")
+    assert row["reason"] == r.text
+
+
 async def test_flagged_request_is_logged_as_flagged(store):
     async with proxy_client("monitor", predictor=malicious, store=store) as c:
         assert (await c.get("/search?q=x")).status_code == 200
