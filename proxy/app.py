@@ -20,7 +20,7 @@ from proxy.decisions import Decision, ensure_visible, record
 from proxy.extract import to_ml_request
 from proxy.logstore import LogStore
 from proxy.reason import explain
-from proxy.rules import first_match
+from proxy.rules import RULES, custom_rules, first_match
 
 logger = logging.getLogger("chokidaar.proxy")
 
@@ -98,11 +98,12 @@ def _blocked(reason: str) -> Response:
     )
 
 
-def _check(predictor, settings: Settings, ml_request: dict):
-    """Returns (decision, response to send instead of forwarding, or None)."""
+def _check(predictor, settings: Settings, ml_request: dict, rules: list = None):
+    """Returns (decision, response to send instead of forwarding, or None).
+    `rules` defaults to the built-in rules."""
     base = dict(method=ml_request["method"], path=ml_request["path"],
                 query=ml_request["query"], mode=settings.mode)
-    hit = first_match(ml_request)
+    hit = first_match(ml_request, rules)
     if hit is not None:
         # A known attack signature: decided here, the classifier is not asked.
         fields = dict(base, label="malicious", score=1.0, reason=hit.reason, rule=hit.rule_id)
@@ -167,9 +168,15 @@ def create_app(settings: Settings = None, transport: httpx.AsyncBaseTransport = 
     client = httpx.AsyncClient(
         transport=transport, timeout=UPSTREAM_TIMEOUT, follow_redirects=False
     )
+    # Built-in rules first, then the approved proposals, loaded once at startup.
+    rules = list(RULES)
 
     @asynccontextmanager
     async def lifespan(_app):
+        custom = await run_in_threadpool(custom_rules, store)
+        rules.extend(custom)
+        if custom:
+            logger.info("loaded %d approved custom rule(s)", len(custom))
         if predictor is None:
             # Load (or train) the model before the first request, not during it.
             # predict() loads it only if it is not loaded already.
@@ -188,7 +195,7 @@ def create_app(settings: Settings = None, transport: httpx.AsyncBaseTransport = 
                                    request.headers.raw, body)
         # Rules and classifier are CPU-bound and synchronous; keep them off the event loop.
         decision, refusal = await run_in_threadpool(
-            _check, predictor or ml_predict.predict, settings, ml_request
+            _check, predictor or ml_predict.predict, settings, ml_request, rules
         )
         recorder(decision)
         await _store(store, decision, request, body, refused=refusal is not None)
