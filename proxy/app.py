@@ -145,6 +145,7 @@ async def _store(store: LogStore, decision: Decision, request: Request, body: by
             store.add_request, method=decision.method, path=decision.path,
             query=decision.query, body=body, decision=stored,
             ip=request.client.host if request.client else None,
+            rule_id=decision.rule or None,
             ml_score=None if decision.action == "error" else decision.score,
             reason=decision.reason,
         )
