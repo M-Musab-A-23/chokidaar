@@ -25,3 +25,18 @@ class Decision:
 
 def record(decision: Decision) -> None:
     logger.info(json.dumps(asdict(decision)))
+
+
+def ensure_visible() -> None:
+    """Make decision lines show up when nothing else configured logging.
+
+    uvicorn sets up only its own loggers, so without this every INFO record
+    from the proxy would be dropped and monitor mode would record nothing.
+    """
+    root, base = logging.getLogger(), logging.getLogger("chokidaar")
+    if base.level == logging.NOTSET:
+        base.setLevel(logging.INFO)
+    if not root.handlers and not base.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+        base.addHandler(handler)
