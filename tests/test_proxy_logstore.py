@@ -1,3 +1,4 @@
+import hashlib
 import os
 import sqlite3
 
@@ -66,3 +67,44 @@ def test_reopening_an_existing_database_keeps_its_rows(store):
     again = LogStore(store.path)
     with again.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM rule_proposals").fetchone()[0] == 1
+
+
+def _rows(store):
+    with store.connect() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM requests ORDER BY id")]
+
+
+def test_add_request_stores_one_row(store):
+    new_id = store.add_request(method="POST", path="/login", query="next=%2F",
+                               body=b"user=' or 1=1 --", decision="block", ip="203.0.113.7",
+                               rule_id="sqli-001", ml_score=0.97, reason="looks like SQL injection")
+    (row,) = _rows(store)
+    assert row["id"] == new_id
+    assert {k: row[k] for k in ("ip", "method", "path", "query", "decision", "rule_id",
+                                "ml_score", "reason")} == {
+        "ip": "203.0.113.7", "method": "POST", "path": "/login", "query": "next=%2F",
+        "decision": "block", "rule_id": "sqli-001", "ml_score": 0.97,
+        "reason": "looks like SQL injection",
+    }
+    assert row["ts"].endswith("+00:00")
+
+
+def test_body_is_stored_only_as_its_sha256(store):
+    secret = b"password=hunter2"
+    store.add_request(method="POST", path="/login", query="", body=secret, decision="allow")
+    (row,) = _rows(store)
+    assert row["body_hash"] == hashlib.sha256(secret).hexdigest()
+    with open(store.path, "rb") as f:
+        assert b"hunter2" not in f.read()
+
+
+def test_optional_fields_may_be_empty(store):
+    store.add_request(method="GET", path="/", query="", body=b"", decision="allow")
+    (row,) = _rows(store)
+    assert (row["ip"], row["rule_id"], row["ml_score"], row["reason"]) == (None, None, None, "")
+    assert row["body_hash"] == hashlib.sha256(b"").hexdigest()
+
+
+def test_unknown_decision_is_refused(store):
+    with pytest.raises(ValueError):
+        store.add_request(method="GET", path="/", query="", body=b"", decision="blocked")

@@ -5,9 +5,11 @@ The database lives at LOG_DB (default logs/chokidaar.db). Request bodies are
 never stored, only their SHA-256, so the log does not keep passwords or other
 data people send.
 """
+import hashlib
 import os
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_PATH = os.path.join("logs", "chokidaar.db")
@@ -70,3 +72,27 @@ class LogStore:
                 yield conn
         finally:
             conn.close()
+
+    def add_request(self, *, method: str, path: str, query: str, body: bytes,
+                    decision: str, ip: str = None, rule_id: str = None,
+                    ml_score: float = None, reason: str = "", ts: str = None) -> int:
+        """Store one request and return its id. `body` is hashed here and the
+        raw bytes go nowhere else."""
+        if decision not in DECISIONS:
+            raise ValueError(f"decision must be one of {', '.join(DECISIONS)}, got {decision!r}")
+        row = (ts or _now(), ip, method, path, query, body_hash(body),
+               decision, rule_id, ml_score, reason)
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO requests (ts, ip, method, path, query, body_hash, decision,"
+                " rule_id, ml_score, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
+            return cursor.lastrowid
+
+
+def body_hash(body: bytes) -> str:
+    return hashlib.sha256(body).hexdigest()
+
+
+def _now() -> str:
+    # UTC ISO 8601 with milliseconds; sorts the same as time.
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
