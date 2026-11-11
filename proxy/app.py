@@ -1,5 +1,5 @@
-"""The reverse proxy: every request is checked by the classifier, then either
-refused with a plain-language reason (MODE=block) or forwarded to UPSTREAM_URL,
+"""The reverse proxy: every request is checked by the signature rules and, if no
+rule matches, by the classifier, then either refused with a plain-language reason (MODE=block) or forwarded to UPSTREAM_URL,
 whose response is passed back unchanged. MODE=monitor forwards everything and
 only records what it would have done.
 
@@ -19,6 +19,7 @@ from proxy.config import Settings, from_env
 from proxy.decisions import Decision, ensure_visible, record
 from proxy.extract import to_ml_request
 from proxy.reason import explain
+from proxy.rules import first_match
 
 logger = logging.getLogger("chokidaar.proxy")
 
@@ -96,6 +97,13 @@ def _check(predictor, settings: Settings, ml_request: dict):
     """Returns (decision, response to send instead of forwarding, or None)."""
     base = dict(method=ml_request["method"], path=ml_request["path"],
                 query=ml_request["query"], mode=settings.mode)
+    hit = first_match(ml_request)
+    if hit is not None:
+        # A known attack signature: decided here, the classifier is not asked.
+        fields = dict(base, label="malicious", score=1.0, reason=hit.reason, rule=hit.rule_id)
+        if settings.mode == "block":
+            return Decision(**fields, action="blocked"), _blocked(hit.reason)
+        return Decision(**fields, action="flagged"), None
     try:
         result = predictor(ml_request)
     except Exception:
@@ -147,7 +155,7 @@ def create_app(settings: Settings = None, transport: httpx.AsyncBaseTransport = 
         ml_request = to_ml_request(request.method, _raw_path(request),
                                    request.scope.get("query_string", b""),
                                    request.headers.raw, body)
-        # The classifier is CPU-bound and synchronous; keep it off the event loop.
+        # Rules and classifier are CPU-bound and synchronous; keep them off the event loop.
         decision, refusal = await run_in_threadpool(
             _check, predictor or ml_predict.predict, settings, ml_request
         )
