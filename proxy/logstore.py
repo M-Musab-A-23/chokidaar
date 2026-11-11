@@ -148,6 +148,21 @@ class LogStore:
                                     (status,))
             return [dict(r) for r in rows]
 
+    def approve(self, proposal_id: int) -> None:
+        """Mark a proposal approved; the proxy loads it as a rule on its next start."""
+        self._set_status(proposal_id, "approved")
+
+    def reject(self, proposal_id: int) -> None:
+        """Mark a proposal rejected; it is never loaded or proposed again."""
+        self._set_status(proposal_id, "rejected")
+
+    def _set_status(self, proposal_id: int, status: str) -> None:
+        with self.connect() as conn:
+            cursor = conn.execute("UPDATE rule_proposals SET status = ? WHERE id = ?",
+                                  (status, int(proposal_id)))
+            if cursor.rowcount == 0:
+                raise KeyError(f"no rule proposal with id {proposal_id}")
+
 
 def body_hash(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()
