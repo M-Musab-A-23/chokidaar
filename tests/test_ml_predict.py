@@ -47,3 +47,19 @@ def test_normal_requests_are_benign(r):
 
 def test_encoded_attack_is_caught():
     assert predict(req(query="q=%253Cscript%253Ealert(1)%253C/script%253E"))["label"] == "malicious"
+
+
+@pytest.mark.parametrize("query", [
+    "id=5 having 7=7", "name=x' or 'q' like 'q", "id=3' or 9>2 -- ", "id=4 group by 2 having 3=3",
+    "id=2'; waitfor delay '0:0:9'--", "id=8 and 6>1", "id=7 or 4 like 4",
+])
+def test_sql_injection_variants_not_in_training_are_caught(query):
+    assert predict(req(query=query))["label"] == "malicious"
+
+
+@pytest.mark.parametrize("query", [
+    "q=having+fun+in+lisbon", "q=this+or+that", "q=5+and+6+items", "q=group+by+size",
+    "q=more+than+5", "q=cats+like+dogs",
+])
+def test_ordinary_words_that_look_like_sql_stay_benign(query):
+    assert predict(req(query=query))["label"] == "benign"
