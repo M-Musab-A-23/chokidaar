@@ -10,6 +10,8 @@ KEYWORDS = {
         r"union\s+(all\s+)?select", r"select\s.+\sfrom", r"\bor\s+\d+\s*=\s*\d+",
         r"\band\s+\d+\s*=\s*\d+", r"'\s*or\s*'", r"drop\s+table", r"insert\s+into",
         r"sleep\s*\(", r"benchmark\s*\(", r"information_schema", r"--\s", r"/\*.*\*/",
+        r"\bhaving\s+\S+\s*(=|<|>|like)\s*\S+", r"\b(or|and)\s+\S+\s*(<|>|like)\s*\S+",
+        r"waitfor\s+delay", r"xp_cmdshell", r"\bgroup\s+by\b.+\bhaving\b",
     ],
     "script tag or handler": [
         r"<\s*script", r"javascript:", r"\bon\w+\s*=", r"<\s*img[^>]+src", r"<\s*iframe",
