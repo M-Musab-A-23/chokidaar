@@ -1,0 +1,21 @@
+services:
+  app:
+    image: bkimminich/juice-shop
+    expose:
+      - "3000"
+
+  chokidaar:
+    build: .
+    depends_on:
+      - app
+    environment:
+      UPSTREAM_URL: http://app:3000
+      MODE: ${MODE:-block}
+      LOG_DB: /data/chokidaar.db
+    volumes:
+      - chokidaar-data:/data
+    ports:
+      - "8080:8080"
+
+volumes:
+  chokidaar-data:
