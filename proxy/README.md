@@ -19,10 +19,15 @@ UPSTREAM_URL=http://127.0.0.1:8000 MODE=block \
 
 ## What happens to a request
 
-1. The method, raw path, raw query, headers and the first 64 KiB of the body go to `ml.predict.predict()`.
-2. The decision is recorded as one JSON line on the `chokidaar.decisions` logger (action `allowed`, `blocked`, `flagged` or `error`, with label, score and reason).
-3. In block mode a malicious request is answered with `403`, `text/plain`. Otherwise the request is forwarded unchanged (apart from hop-by-hop headers and `Host`), and the app's status, headers and raw body are returned as they are. Redirects are not followed.
+1. The method, raw path, raw query, headers and the first 64 KiB of the body are checked against the signature rules in `proxy/rules.py` (SQL injection, XSS, path traversal, command injection). Each part is checked as sent, after each of up to three rounds of URL decoding, and with HTML entities decoded. On a hit the rule decides (label `malicious`, score `1.0`) and the classifier is not called.
+2. Otherwise the same parts go to `ml.predict.predict()`.
+3. The decision is recorded as one JSON line on the `chokidaar.decisions` logger (action `allowed`, `blocked`, `flagged` or `error`, with label, score, reason and the id of the rule that matched, if any).
+4. In block mode a malicious request is answered with `403`, `text/plain`. Otherwise the request is forwarded unchanged (apart from hop-by-hop headers and `Host`), and the app's status, headers and raw body are returned as they are. Redirects are not followed.
 
 If the app cannot be reached the proxy answers `502` (`504` on timeout). If the classifier itself fails, monitor mode still forwards the request and block mode answers `503`.
 
 Bodies are buffered in memory on the way in and out, so very large uploads and downloads use proportional memory. WebSockets are not proxied yet.
+
+## Rules
+
+Each rule in `proxy.rules.RULES` has an `id`, an `attack_type`, a case-insensitive `regex` and a `description` used in the block reason, which names the attack, the part of the request it was found in and the matching text. `proxy.rules.scan(request)` returns every matching rule; the proxy uses the first. `tests/attacks/payloads.json` holds malicious and benign payloads for each attack type; every malicious one must hit a rule of its type and no benign one may hit any rule.
