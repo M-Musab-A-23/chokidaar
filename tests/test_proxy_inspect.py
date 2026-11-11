@@ -52,9 +52,9 @@ async def test_benign_requests_are_forwarded_and_recorded(mode):
 async def test_monitor_mode_forwards_malicious_requests_and_records_them():
     decisions = []
     async with proxy_client("monitor", predictor=malicious, recorder=decisions.append) as c:
-        r = await c.post("/login?next=%2F", content=b"user=' or 1=1 --")
+        r = await c.post("/login?next=%2F", content=b"user=jo")
     assert r.status_code == 200
-    assert r.json()["body"] == "user=' or 1=1 --"
+    assert r.json()["body"] == "user=jo"
     (d,) = decisions
     assert (d.action, d.mode, d.label, d.path, d.query) == (
         "flagged", "monitor", "malicious", "/login", "next=%2F")
@@ -113,18 +113,24 @@ def fresh_model(tmp_path):
     predict_module.load(str(tmp_path / "missing.joblib"))
 
 
+# No rule matches this, so the decision is the classifier's own.
+MODEL_ONLY_ATTACK = {"name": "....//....//config.yml"}
+
+
 async def test_real_classifier_blocks_an_attack(fresh_model):
-    async with proxy_client("block", predictor=None) as c:
-        attack = await c.get("/search", params={"q": "<script>alert(document.cookie)</script>"})
+    decisions = []
+    async with proxy_client("block", predictor=None, recorder=decisions.append) as c:
+        attack = await c.get("/files", params=MODEL_ONLY_ATTACK)
         normal = await c.get("/products", params={"page": "2", "sort": "price"})
     assert attack.status_code == 403
-    assert "cross-site scripting" in attack.text
+    assert "path traversal" in attack.text
     assert normal.status_code == 200
+    assert [(d.action, d.rule) for d in decisions] == [("blocked", ""), ("allowed", "")]
 
 
 async def test_real_classifier_in_monitor_mode_lets_attacks_through(fresh_model):
     decisions = []
     async with proxy_client("monitor", predictor=None, recorder=decisions.append) as c:
-        r = await c.get("/files", params={"name": "../../../etc/passwd"})
+        r = await c.get("/files", params=MODEL_ONLY_ATTACK)
     assert r.status_code == 200
-    assert decisions[0].action == "flagged"
+    assert (decisions[0].action, decisions[0].rule) == ("flagged", "")
