@@ -9,9 +9,12 @@ text.
 import hmac
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from proxy.logstore import LogStore
 
@@ -25,6 +28,7 @@ def token_from_env(environ=None) -> str:
 
 
 TIMELINE_HOURS = 24
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 def _utcnow() -> datetime:
@@ -60,6 +64,14 @@ def create_app(store: LogStore = None, token: str = None, clock=_utcnow) -> Fast
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    # The page and its assets hold no data, so they need no token; the page
+    # asks for it and sends it with every API call.
+    @app.get("/", include_in_schema=False)
+    def index():
+        return FileResponse(STATIC_DIR / "index.html")
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/api/summary", dependencies=[api])
     def summary():

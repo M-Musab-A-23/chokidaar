@@ -192,3 +192,44 @@ async def test_approve_and_reject_need_the_token(client, store, action):
     r = await client.post(f"/api/suggestions/{pid}/{action}")
     assert r.status_code == 401
     assert store.proposals()[0]["status"] == "pending"
+
+
+# --- page and attacker-controlled values ---
+
+XSS_PATH = "/search/<script>alert(1)</script><img src=x onerror=alert(2)>"
+
+
+async def test_page_and_assets_are_served_without_the_token(client):
+    r = await client.get("/")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    assert 'src="/static/app.js"' in r.text
+    for asset, kind in (("/static/app.js", "javascript"), ("/static/app.css", "text/css")):
+        r = await client.get(asset)
+        assert r.status_code == 200 and kind in r.headers["content-type"]
+
+
+async def test_page_loads_nothing_from_other_origins(client):
+    for path in ("/", "/static/app.js", "/static/app.css"):
+        text = (await client.get(path)).text
+        assert "http://" not in text.replace("http://www.w3.org/2000/svg", "")
+        assert "https://" not in text and "//cdn" not in text
+
+
+async def test_page_script_never_writes_markup(client):
+    js = (await client.get("/static/app.js")).text
+    for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
+        assert sink not in js
+
+
+async def test_xss_payload_in_a_logged_path_comes_back_as_plain_data(client, store):
+    log(store, "block", path=XSS_PATH, reason=f"blocked {XSS_PATH}")
+    store.add_proposal(pattern="<script>alert(3)</script>", attack_type="xss")
+    r = await client.get("/api/requests", headers=AUTH)
+    assert r.headers["content-type"] == "application/json"
+    (row,) = r.json()
+    assert row["path"] == XSS_PATH
+    assert row["reason"] == f"blocked {XSS_PATH}"
+    r = await client.get("/api/suggestions", headers=AUTH)
+    assert r.headers["content-type"] == "application/json"
+    assert r.json()[0]["pattern"] == "<script>alert(3)</script>"

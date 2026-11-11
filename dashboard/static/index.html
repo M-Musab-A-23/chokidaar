@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chokidaar dashboard</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <section id="login" class="login" hidden>
+    <form id="login-form" class="panel">
+      <h1>Chokidaar</h1>
+      <label for="token">Admin token</label>
+      <input id="token" name="token" type="password" autocomplete="current-password" required>
+      <button type="submit">Sign in</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <div id="app" hidden>
+    <header class="top">
+      <h1>Chokidaar</h1>
+      <span id="status" class="muted" aria-live="polite"></span>
+      <button id="logout" type="button" class="secondary">Sign out</button>
+    </header>
+
+    <main>
+      <section aria-label="Summary" class="cards">
+        <div class="card"><span class="label">Requests</span><span id="c-total" class="value">-</span></div>
+        <div class="card"><span class="label">Allowed</span><span id="c-allow" class="value">-</span></div>
+        <div class="card block"><span class="label">Blocked</span><span id="c-block" class="value">-</span></div>
+        <div class="card flagged"><span class="label">Flagged</span><span id="c-flagged" class="value">-</span></div>
+        <div class="card"><span class="label">Blocked share</span><span id="c-share" class="value">-</span></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Attack timeline, last 24 hours</h2>
+          <span class="legend"><i class="swatch requests"></i>Requests <i class="swatch blocks"></i>Blocked</span>
+        </div>
+        <svg id="timeline" class="timeline" viewBox="0 0 720 200" role="img"
+             aria-label="Requests and blocked requests per hour for the last 24 hours"></svg>
+      </section>
+
+      <div class="grid">
+        <section class="panel">
+          <h2>Top blocked IPs</h2>
+          <table>
+            <thead><tr><th>IP</th><th class="num">Blocks</th></tr></thead>
+            <tbody id="top-ips"></tbody>
+          </table>
+          <p class="hint muted">Select an IP to show only its requests.</p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Rule suggestions</h2>
+            <label>Status
+              <select id="suggestion-status">
+                <option value="pending" selected>Pending</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+                <option value="">All</option>
+              </select>
+            </label>
+          </div>
+          <ul id="suggestions" class="suggestions"></ul>
+          <p class="hint muted">Approved rules take effect when the proxy restarts.</p>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Recent requests</h2>
+          <div class="filters">
+            <label>Decision
+              <select id="decision">
+                <option value="">All</option>
+                <option value="allow">Allowed</option>
+                <option value="block">Blocked</option>
+                <option value="flagged">Flagged</option>
+              </select>
+            </label>
+            <label>IP <input id="ip" type="text" maxlength="64" spellcheck="false" placeholder="any"></label>
+          </div>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr><th>Time</th><th>IP</th><th>Method</th><th>Path</th><th>Decision</th>
+                  <th>Rule</th><th class="num">Score</th><th>Reason</th></tr>
+            </thead>
+            <tbody id="requests"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
