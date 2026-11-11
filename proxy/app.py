@@ -18,6 +18,7 @@ from ml import predict as ml_predict
 from proxy.config import Settings, from_env
 from proxy.decisions import Decision, ensure_visible, record
 from proxy.extract import to_ml_request
+from proxy.logstore import LogStore
 from proxy.reason import explain
 from proxy.rules import first_match
 
@@ -31,6 +32,10 @@ HOP_BY_HOP = {
 }
 UPSTREAM_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 WARM_UP_REQUEST = {"method": "GET", "path": "/", "query": "", "headers": {}, "body": ""}
+CLASSIFIER_FAILED = "The classifier failed, so the request could not be checked."
+# Decision.action -> requests.decision in the log store. "error" is stored as
+# what actually happened to the request: refused (block) or forwarded (allow).
+STORED_DECISION = {"allowed": "allow", "blocked": "block", "flagged": "flagged"}
 
 
 def _hop_by_hop(headers: list) -> set:
@@ -108,7 +113,7 @@ def _check(predictor, settings: Settings, ml_request: dict):
         result = predictor(ml_request)
     except Exception:
         logger.exception("classifier failed on %s %s", base["method"], base["path"])
-        decision = Decision(**base, action="error")
+        decision = Decision(**base, action="error", reason=CLASSIFIER_FAILED)
         if settings.mode == "block":
             return decision, PlainTextResponse(
                 "This request could not be checked, so it was not let through. "
@@ -127,11 +132,34 @@ def _check(predictor, settings: Settings, ml_request: dict):
     return Decision(**base, action="flagged", label=label, score=score, reason=reason), None
 
 
+async def _store(store: LogStore, decision: Decision, request: Request, body: bytes,
+                 refused: bool) -> None:
+    """Write the request to the log store. Never raises: a broken log must not
+    turn into a broken request."""
+    if decision.action == "error":
+        stored = "block" if refused else "allow"
+    else:
+        stored = STORED_DECISION[decision.action]
+    try:
+        await run_in_threadpool(
+            store.add_request, method=decision.method, path=decision.path,
+            query=decision.query, body=body, decision=stored,
+            ip=request.client.host if request.client else None,
+            ml_score=None if decision.action == "error" else decision.score,
+            reason=decision.reason,
+        )
+    except Exception:
+        logger.exception("could not write %s %s to the request log",
+                         decision.method, decision.path)
+
+
 def create_app(settings: Settings = None, transport: httpx.AsyncBaseTransport = None,
-               predictor=None, recorder=None) -> FastAPI:
-    """`predictor` defaults to ml.predict.predict and `recorder` to
-    proxy.decisions.record; both can be swapped out in tests."""
+               predictor=None, recorder=None, store: LogStore = None) -> FastAPI:
+    """`predictor` defaults to ml.predict.predict, `recorder` to
+    proxy.decisions.record and `store` to a LogStore at LOG_DB; all can be
+    swapped out in tests."""
     settings = settings or from_env()
+    store = store or LogStore()
     if recorder is None:
         recorder = record
         ensure_visible()
@@ -162,6 +190,7 @@ def create_app(settings: Settings = None, transport: httpx.AsyncBaseTransport = 
             _check, predictor or ml_predict.predict, settings, ml_request
         )
         recorder(decision)
+        await _store(store, decision, request, body, refused=refusal is not None)
         if refusal is not None:
             return refusal
         return await _forward(client, settings.upstream_url, request, body)
