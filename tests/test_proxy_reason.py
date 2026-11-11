@@ -25,6 +25,16 @@ def test_falls_back_to_a_generic_reason():
     assert "contact the site administrator" in text
 
 
+def test_flagged_requests_say_flagged_not_blocked():
+    text = explain(["sql keyword pattern", 'fragment "or 1=1"'], flagged=True)
+    assert text.startswith("This request was flagged because it looks like SQL injection")
+    assert "blocked" not in text
+    assert 'Suspicious parts: "or 1=1".' in text
+    assert "contact the site administrator" not in text
+    assert explain([], flagged=True).startswith(
+        "This request was flagged because it looks like an attack")
+
+
 def test_reason_for_a_real_prediction(tmp_path):
     from ml import predict as predict_module
 

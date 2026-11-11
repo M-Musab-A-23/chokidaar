@@ -58,7 +58,8 @@ async def test_monitor_mode_forwards_malicious_requests_and_records_them():
     (d,) = decisions
     assert (d.action, d.mode, d.label, d.path, d.query) == (
         "flagged", "monitor", "malicious", "/login", "next=%2F")
-    assert "SQL injection" in d.reason
+    assert d.reason.startswith("This request was flagged because it looks like SQL injection")
+    assert "blocked" not in d.reason
 
 
 async def test_classifier_sees_the_whole_request():

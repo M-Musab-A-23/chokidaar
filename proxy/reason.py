@@ -17,15 +17,19 @@ def _fragments(top_features: list) -> list:
     return [q for q in quoted if len(q.strip('"').strip()) >= MIN_FRAGMENT_LENGTH]
 
 
-def explain(top_features: list) -> str:
+def explain(top_features: list, flagged: bool = False) -> str:
+    """The reason for a block, shown to the visitor. With flagged=True (monitor
+    mode, the request was let through) it says "flagged" and is meant only for
+    the admin, so it has no "contact the administrator" line."""
     kinds = [ATTACK_NAMES[f] for f in top_features if f in ATTACK_NAMES]
     fragments = _fragments(top_features)
-    if kinds:
-        text = "This request was blocked because it looks like " + _join(kinds) + "."
-    else:
-        text = "This request was blocked because it looks like an attack on this website."
+    verb = "flagged" if flagged else "blocked"
+    what = _join(kinds) if kinds else "an attack on this website"
+    text = f"This request was {verb} because it looks like {what}."
     if fragments:
         text += " Suspicious parts: " + ", ".join(fragments) + "."
+    if flagged:
+        return text
     return text + " If you think this is a mistake, contact the site administrator."
 
 
