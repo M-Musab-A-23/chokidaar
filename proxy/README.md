@@ -52,3 +52,38 @@ The same database holds `rule_proposals` (`pattern`, `attack_type`, `rationale`,
 The row is written after the decision and before the request is forwarded. If writing fails (disk full, bad path, locked database) the error is logged on `chokidaar.proxy` and the request carries on as if nothing happened.
 
 `LogStore` also has read helpers for the dashboard: `recent(limit)`, `counts()` (requests per decision) and `top_blocked_ips(limit)`.
+
+`LogStore` also has `blocked_and_flagged(limit)`, `add_proposal(...)`, `proposals(status)`, `approve(id)` and `reject(id)` for rule suggestions (below).
+
+## Rule suggestions
+
+`proxy/suggest.py` asks a language model to propose new signature rules based on what the proxy has recently blocked or flagged. Nothing it proposes is used until an admin approves it.
+
+```
+python -m proxy.suggest [--limit N] [--dry-run]
+```
+
+1. The newest `N` (default 200) blocked and flagged rows are read from the request log.
+2. Similar rows are grouped: same deciding rule (or the classifier), same method and the same path once numbers are ignored. The 20 largest groups go into the prompt, each with its count, reason and up to three example paths with query strings. Request bodies are never in the log, so the model never sees them. The examples are marked as untrusted data in the prompt.
+3. The model is asked for a JSON list of `{"pattern", "attack_type", "rationale"}`. A code fence or text around the list is tolerated; any other answer is an error and nothing is saved.
+4. Every proposal is checked. It is rejected, with the reason printed, if the regex does not compile, `attack_type` is not one of `sqli`, `xss`, `traversal` or `cmdi`, the pattern is shorter than 4 characters, it matches the empty string, or it matches any benign payload in `tests/attacks/payloads.json` (checked exactly as the proxy would check it, after URL and HTML entity decoding).
+5. Valid proposals are saved in `rule_proposals` with status `pending`. A pattern already proposed for the same attack type, whatever its status, is skipped, so a rejected rule is not proposed again. `--dry-run` prints what would be saved and writes nothing.
+
+| Variable | Meaning |
+| --- | --- |
+| `SUGGEST_URL` | Ollama server, default `http://localhost:11434`. |
+| `SUGGEST_MODEL` | Model name, default `llama3.1`. |
+| `LOG_DB` | The request log to read and write, as for the proxy. |
+
+The model client is pluggable: anything with a `complete(prompt) -> str` method can be passed to `proxy.suggest.run(store, client, ...)`. `OllamaClient` is the default and `FakeClient` returns canned answers for tests, which never use the network.
+
+To review proposals:
+
+```
+python -c "from proxy.logstore import LogStore; print(*LogStore().proposals('pending'), sep='
+')"
+python -c "from proxy.logstore import LogStore; LogStore().approve(3)"
+python -c "from proxy.logstore import LogStore; LogStore().reject(4)"
+```
+
+When the proxy starts, it loads every approved proposal as a rule with id `custom-<id>`. Built-in rules are checked first. A block by a custom rule tells the visitor the request contains "a pattern the site administrator added as an attack signature"; the model's rationale is never shown to visitors. Approving or rejecting takes effect the next time the proxy starts. An approved proposal that no longer compiles is skipped with a warning on `chokidaar.proxy`, and if the log cannot be read the proxy starts with the built-in rules only.
