@@ -61,6 +61,7 @@ If the application cannot be reached the proxy answers `502`, or `504` on a time
 | `MODE` | proxy | `block` (default) or `monitor`. |
 | `LOG_DB` | proxy, dashboard, suggestions | SQLite file, default `logs/chokidaar.db`. |
 | `CHOKIDAAR_MODEL` | proxy | Path to a trained model file. |
+| `CHOKIDAAR_THRESHOLD` | proxy | Score at or above which the classifier calls a request malicious, default 0.5. |
 | `ADMIN_TOKEN` | dashboard | Required. The dashboard refuses to start without it. |
 | `DASHBOARD_PORT` | dashboard | Default 8081. |
 | `SUGGEST_URL`, `SUGGEST_MODEL` | suggestions | Local Ollama server and model name. |
