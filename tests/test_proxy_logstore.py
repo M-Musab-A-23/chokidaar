@@ -178,3 +178,21 @@ def test_proposals_filters_by_status(store):
     assert store.proposals("approved") == []
     with pytest.raises(ValueError):
         store.proposals("maybe")
+
+
+def test_approve_and_reject_change_the_status(store):
+    first = store.add_proposal(pattern="abcd", attack_type="xss")
+    second = store.add_proposal(pattern="efgh", attack_type="xss")
+    store.approve(first)
+    store.reject(second)
+    assert [p["id"] for p in store.proposals("approved")] == [first]
+    assert [p["id"] for p in store.proposals("rejected")] == [second]
+    store.approve(second)
+    assert store.proposals("rejected") == []
+
+
+def test_approve_or_reject_an_unknown_id_raises(store):
+    with pytest.raises(KeyError):
+        store.approve(42)
+    with pytest.raises(KeyError):
+        store.reject(42)
