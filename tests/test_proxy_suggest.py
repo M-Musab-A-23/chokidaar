@@ -178,3 +178,79 @@ def test_bad_proposals_are_refused_with_a_reason(proposal, why):
 def test_benign_check_sees_url_decoded_text():
     benign = [{**BENIGN[0], "query": "q=hello%20world"}]
     assert "benign" in validate(_proposal(pattern="hello world", attack_type="xss"), benign)
+
+
+from proxy.logstore import LogStore  # noqa: E402
+from proxy.suggest import run  # noqa: E402
+
+GOOD = {"pattern": r"zz-attack-marker-\d+", "attack_type": "sqli", "rationale": "marker"}
+
+
+@pytest.fixture
+def store(tmp_path):
+    store = LogStore(str(tmp_path / "suggest.db"))
+    store.add_request(method="GET", path="/item/1", query="id=1' or 1=1", body=b"",
+                      decision="block", rule_id="sqli-tautology", reason="sql")
+    store.add_request(method="GET", path="/ok", query="", body=b"", decision="allow")
+    store.add_request(method="GET", path="/item/2", query="q=<x>", body=b"", decision="flagged")
+    return store
+
+
+def test_run_saves_valid_proposals_as_pending(store):
+    bad = {"pattern": "a", "attack_type": "sqli", "rationale": ""}
+    client = FakeClient(json.dumps([GOOD, bad, {**GOOD, "attack_type": "rce"}]))
+    summary = run(store, client, benign=BENIGN)
+    assert (summary.rows, summary.groups) == (2, 2)
+    assert [p for _, p in summary.saved] == [GOOD]
+    assert [why for _, why in summary.rejected] == [
+        "pattern is shorter than 4 characters",
+        "attack_type must be one of sqli, xss, traversal, cmdi, got 'rce'"]
+    (saved,) = store.proposals()
+    assert (saved["id"], saved["status"], saved["pattern"]) == (summary.saved[0][0], "pending",
+                                                                GOOD["pattern"])
+
+
+def test_run_prompt_contains_only_blocked_and_flagged_rows(store):
+    client = FakeClient("[]")
+    run(store, client, benign=BENIGN)
+    (prompt,) = client.prompts
+    assert "id=1' or 1=1" in prompt and "q=<x>" in prompt and "/ok" not in prompt
+
+
+def test_run_respects_the_limit(store):
+    client = FakeClient("[]")
+    assert run(store, client, limit=1, benign=BENIGN).rows == 1
+    assert "q=<x>" in client.prompts[0] and "or 1=1" not in client.prompts[0]
+
+
+def test_run_skips_duplicates_already_stored_or_repeated(store):
+    store.add_proposal(**GOOD)
+    store.reject(store.proposals()[0]["id"])
+    other = {**GOOD, "pattern": r"yy-attack-marker-\d+"}
+    summary = run(store, FakeClient(json.dumps([GOOD, other, other])), benign=BENIGN)
+    assert summary.duplicates == [GOOD, other]
+    assert [p for _, p in summary.saved] == [other]
+    assert len(store.proposals()) == 2
+
+
+def test_dry_run_writes_nothing(store):
+    summary = run(store, FakeClient(json.dumps([GOOD])), dry_run=True, benign=BENIGN)
+    assert summary.saved == [(None, GOOD)]
+    assert store.proposals() == []
+
+
+def test_missing_rationale_is_stored_empty(store):
+    run(store, FakeClient(json.dumps([{"pattern": GOOD["pattern"], "attack_type": "sqli"}])),
+        benign=BENIGN)
+    assert store.proposals()[0]["rationale"] == ""
+
+
+def test_empty_log_does_not_ask_the_model(tmp_path):
+    client = FakeClient()
+    summary = run(LogStore(str(tmp_path / "empty.db")), client, benign=BENIGN)
+    assert (summary.rows, summary.saved, client.prompts) == (0, [], [])
+
+
+def test_unusable_answer_raises(store):
+    with pytest.raises(SuggestError):
+        run(store, FakeClient("sorry"), benign=BENIGN)
