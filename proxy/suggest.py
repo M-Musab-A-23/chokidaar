@@ -209,3 +209,50 @@ def validate(proposal, benign: list) -> str:
         if hits:
             return f"pattern matches a benign payload: {hits[0].matched!r} in the {hits[0].location}"
     return None
+
+
+DEFAULT_LIMIT = 200
+
+
+@dataclass
+class Summary:
+    """What one run did. In a dry run `saved` holds the proposals that would be
+    saved, with id None."""
+    rows: int = 0
+    groups: int = 0
+    saved: list = field(default_factory=list)       # [(id, proposal)]
+    duplicates: list = field(default_factory=list)  # [proposal]
+    rejected: list = field(default_factory=list)    # [(proposal, reason)]
+
+
+def run(store, client: ModelClient, limit: int = DEFAULT_LIMIT, dry_run: bool = False,
+        benign: list = None) -> Summary:
+    """Read up to `limit` of the newest blocked and flagged requests, ask the
+    model for rules and save the valid, new ones as pending proposals (nothing
+    is written in a dry run). The model is not asked when there is nothing to
+    look at."""
+    rows = store.blocked_and_flagged(limit)
+    groups = group_requests(rows)
+    summary = Summary(rows=len(rows), groups=len(groups))
+    if not groups:
+        return summary
+    benign = benign_payloads() if benign is None else benign
+    known = {(p["pattern"], p["attack_type"]) for p in store.proposals()}
+    for proposal in parse_proposals(client.complete(build_prompt(groups))):
+        reason = validate(proposal, benign)
+        if reason:
+            summary.rejected.append((proposal, reason))
+            continue
+        clean = {"pattern": proposal["pattern"], "attack_type": proposal["attack_type"],
+                 "rationale": proposal.get("rationale", "")}
+        key = (clean["pattern"], clean["attack_type"])
+        if key in known:
+            summary.duplicates.append(clean)
+            continue
+        known.add(key)
+        new_id = None if dry_run else store.add_proposal(**clean)
+        if new_id is None and not dry_run:
+            summary.duplicates.append(clean)
+        else:
+            summary.saved.append((new_id, clean))
+    return summary
