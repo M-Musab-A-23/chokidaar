@@ -7,11 +7,19 @@ ATTACK_NAMES = {
     "shell command pattern": "command injection (an attempt to run commands on the server)",
 }
 FRAGMENT_PREFIX = "fragment "
+# The model's fragments are character n-grams; short ones like "scr" or "/s"
+# mean nothing to a reader, so only longer ones are quoted back.
+MIN_FRAGMENT_LENGTH = 4
+
+
+def _fragments(top_features: list) -> list:
+    quoted = [f[len(FRAGMENT_PREFIX):] for f in top_features if f.startswith(FRAGMENT_PREFIX)]
+    return [q for q in quoted if len(q.strip('"').strip()) >= MIN_FRAGMENT_LENGTH]
 
 
 def explain(top_features: list) -> str:
     kinds = [ATTACK_NAMES[f] for f in top_features if f in ATTACK_NAMES]
-    fragments = [f[len(FRAGMENT_PREFIX):] for f in top_features if f.startswith(FRAGMENT_PREFIX)]
+    fragments = _fragments(top_features)
     if kinds:
         text = "This request was blocked because it looks like " + _join(kinds) + "."
     else:

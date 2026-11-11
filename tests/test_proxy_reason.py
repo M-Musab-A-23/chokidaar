@@ -7,6 +7,13 @@ def test_names_the_attack_and_the_suspicious_parts():
     assert 'Suspicious parts: "or 1=1", "\' or".' in text
 
 
+def test_short_fragments_are_left_out():
+    text = explain(["script tag or handler pattern", 'fragment "scr"', 'fragment "/s"'])
+    assert "Suspicious parts" not in text
+    text = explain(['fragment "ip"', 'fragment "<script"'])
+    assert 'Suspicious parts: "<script".' in text
+
+
 def test_several_attack_kinds_read_as_a_list():
     text = explain(["path traversal pattern", "shell command pattern"])
     assert "path traversal (" in text and " and command injection (" in text
