@@ -88,6 +88,32 @@ class LogStore:
                 " rule_id, ml_score, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
             return cursor.lastrowid
 
+    def recent(self, limit: int = 50) -> list:
+        """The newest requests first, as dicts."""
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM requests ORDER BY id DESC LIMIT ?",
+                                (max(0, int(limit)),))
+            return [dict(r) for r in rows]
+
+    def counts(self) -> dict:
+        """Number of requests per decision; every decision is present, even at 0."""
+        totals = dict.fromkeys(DECISIONS, 0)
+        with self.connect() as conn:
+            for decision, n in conn.execute(
+                    "SELECT decision, COUNT(*) FROM requests GROUP BY decision"):
+                totals[decision] = n
+        return totals
+
+    def top_blocked_ips(self, limit: int = 10) -> list:
+        """[(ip, blocks)] for the IPs with the most blocked requests, most first;
+        ties are broken by IP so the order is stable."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT ip, COUNT(*) AS blocks FROM requests"
+                " WHERE decision = 'block' AND ip IS NOT NULL"
+                " GROUP BY ip ORDER BY blocks DESC, ip LIMIT ?", (max(0, int(limit)),))
+            return [(r["ip"], r["blocks"]) for r in rows]
+
 
 def body_hash(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()

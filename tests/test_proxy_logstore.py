@@ -108,3 +108,43 @@ def test_optional_fields_may_be_empty(store):
 def test_unknown_decision_is_refused(store):
     with pytest.raises(ValueError):
         store.add_request(method="GET", path="/", query="", body=b"", decision="blocked")
+
+
+def _add(store, decision="allow", ip="198.51.100.1", path="/"):
+    return store.add_request(method="GET", path=path, query="", body=b"",
+                             decision=decision, ip=ip)
+
+
+def test_recent_returns_newest_first_up_to_the_limit(store):
+    for i in range(5):
+        _add(store, path=f"/{i}")
+    assert [r["path"] for r in store.recent(3)] == ["/4", "/3", "/2"]
+    assert len(store.recent()) == 5
+    assert store.recent(0) == []
+
+
+def test_recent_on_an_empty_log(store):
+    assert store.recent(10) == []
+
+
+def test_counts_by_decision(store):
+    assert store.counts() == {"allow": 0, "block": 0, "flagged": 0}
+    for decision in ("allow", "allow", "block", "flagged", "allow"):
+        _add(store, decision=decision)
+    assert store.counts() == {"allow": 3, "block": 1, "flagged": 1}
+
+
+def test_top_blocked_ips_counts_only_blocks(store):
+    for ip, decision in [("10.0.0.1", "block"), ("10.0.0.1", "block"), ("10.0.0.1", "allow"),
+                         ("10.0.0.2", "block"), ("10.0.0.2", "flagged"), ("10.0.0.2", "flagged"),
+                         ("10.0.0.3", "block"), ("10.0.0.3", "block"), ("10.0.0.3", "block"),
+                         ("10.0.0.4", "allow"), (None, "block")]:
+        _add(store, decision=decision, ip=ip)
+    assert store.top_blocked_ips() == [("10.0.0.3", 3), ("10.0.0.1", 2), ("10.0.0.2", 1)]
+    assert store.top_blocked_ips(limit=2) == [("10.0.0.3", 3), ("10.0.0.1", 2)]
+
+
+def test_top_blocked_ips_breaks_ties_by_ip(store):
+    for ip in ("10.0.0.9", "10.0.0.5"):
+        _add(store, decision="block", ip=ip)
+    assert store.top_blocked_ips() == [("10.0.0.5", 1), ("10.0.0.9", 1)]
