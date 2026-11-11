@@ -8,8 +8,10 @@ text.
 """
 import hmac
 import os
+from datetime import datetime, timedelta, timezone
+from typing import Literal, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
 from proxy.logstore import LogStore
 
@@ -22,8 +24,16 @@ def token_from_env(environ=None) -> str:
     return token
 
 
-def create_app(store: LogStore = None, token: str = None) -> FastAPI:
-    """`store` defaults to a LogStore at LOG_DB and `token` to ADMIN_TOKEN."""
+TIMELINE_HOURS = 24
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def create_app(store: LogStore = None, token: str = None, clock=_utcnow) -> FastAPI:
+    """`store` defaults to a LogStore at LOG_DB and `token` to ADMIN_TOKEN;
+    `clock` (returning an aware datetime) can be swapped out in tests."""
     token = token if token is not None else token_from_env()
     if not token.strip():
         raise RuntimeError("ADMIN_TOKEN is empty; the dashboard will not start without it")
@@ -57,5 +67,30 @@ def create_app(store: LogStore = None, token: str = None) -> FastAPI:
         total = sum(counts.values())
         return {"counts": counts, "total": total,
                 "blocked_share": counts["block"] / total if total else 0.0}
+
+    @app.get("/api/requests", dependencies=[api])
+    def requests(limit: int = Query(50, ge=1, le=500),
+                 decision: Optional[Literal["allow", "block", "flagged"]] = None,
+                 ip: Optional[str] = Query(None, max_length=64)):
+        return store.recent(limit, decision=decision, ip=ip or None)
+
+    @app.get("/api/top-ips", dependencies=[api])
+    def top_ips(limit: int = Query(10, ge=1, le=100)):
+        return [{"ip": ip, "blocks": blocks} for ip, blocks in store.top_blocked_ips(limit)]
+
+    @app.get("/api/timeline", dependencies=[api])
+    def timeline():
+        """Requests and blocks per UTC hour for the last 24 hours, the current
+        hour last; hours without requests are included at 0."""
+        current = clock().astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        start = current - timedelta(hours=TIMELINE_HOURS - 1)
+        counts = store.hourly(start)
+        hours = []
+        for i in range(TIMELINE_HOURS):
+            hour = start + timedelta(hours=i)
+            requests_, blocks = counts.get(hour.strftime("%Y-%m-%dT%H"), (0, 0))
+            hours.append({"hour": hour.strftime("%Y-%m-%dT%H:00:00Z"),
+                          "requests": requests_, "blocks": blocks})
+        return hours
 
     return app
