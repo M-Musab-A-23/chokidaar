@@ -4,7 +4,9 @@ Feature extraction, training and prediction for the request classifier.
 
 ```
 python -m ml.train       # trains on the bundled samples, writes models/model.joblib
-python -m ml.evaluate    # precision, recall, F1 and latency on a held-out split
+python -m ml.evaluate    # precision, recall, F1 and latency on generated data
+python -m ml.evaluate_csic   # the same on the CSIC 2010 dataset (files in data/raw/)
+python -m ml.train --csic    # also train on the CSIC 2010 training part
 ```
 
 Trained model files and raw datasets are not committed.
@@ -18,7 +20,7 @@ predict({"method": "GET", "path": "/search", "query": "q=' OR 1=1 --", "headers"
 # {"score": 0.99, "label": "malicious", "top_features": ["sql keyword pattern", 'fragment "or 1=1"']}
 ```
 
-`score` is between 0 and 1, and a request at or above 0.5 is labelled `malicious`. `top_features` is only filled for malicious requests and is shown to the user as the reason for the block. The model is loaded from `models/model.joblib` (or the path in `CHOKIDAAR_MODEL`); if the file is missing it is trained on the bundled samples.
+`score` is between 0 and 1, and a request at or above the threshold (0.5, or `CHOKIDAAR_THRESHOLD`) is labelled `malicious`. `top_features` is only filled for malicious requests and is shown to the user as the reason for the block. The model is loaded from `models/model.joblib` (or the path in `CHOKIDAAR_MODEL`); if the file is missing it is trained on the bundled samples.
 
 ## How it works
 
