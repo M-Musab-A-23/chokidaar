@@ -14,6 +14,7 @@ UPSTREAM_URL=http://127.0.0.1:8000 MODE=block \
 | `UPSTREAM_URL` | Required. The app to protect, e.g. `http://127.0.0.1:8000`. |
 | `MODE` | `block` (default): malicious requests get `403` with a plain-language reason and never reach the app. `monitor`: everything is forwarded and the decision is only recorded. |
 | `CHOKIDAAR_MODEL` | Optional model path (see `ml/README.md`). |
+| `CHOKIDAAR_THRESHOLD` | Classifier score at or above which a request is malicious, default `0.5`. Raise it for fewer false alarms and more missed attacks (see `docs/evaluation.md`). |
 | `LOG_DB` | SQLite request log, default `logs/chokidaar.db`. The directory is created if needed. |
 
 `--no-server-header --no-date-header` stop uvicorn adding its own `server` and `date` headers next to the ones from the app, so responses reach the client exactly as the app sent them.
