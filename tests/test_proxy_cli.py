@@ -85,3 +85,26 @@ def test_runs_as_a_module():
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 0
     assert "--upstream" in result.stdout
+
+
+def test_no_bundled_model_when_not_frozen(monkeypatch):
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    env = {}
+    cli.configure_env(cli.parse_args(["--upstream", UPSTREAM]), env)
+    assert "CHOKIDAAR_MODEL" not in env
+
+
+def test_frozen_uses_the_bundled_model(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    env = {}
+    cli.configure_env(cli.parse_args(["--upstream", UPSTREAM]), env)
+    assert env["CHOKIDAAR_MODEL"] == os.path.join(str(tmp_path), "models", "model.joblib")
+
+
+def test_frozen_keeps_an_explicit_model(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    env = {"CHOKIDAAR_MODEL": "my-model.joblib"}
+    cli.configure_env(cli.parse_args(["--upstream", UPSTREAM]), env)
+    assert env["CHOKIDAAR_MODEL"] == "my-model.joblib"

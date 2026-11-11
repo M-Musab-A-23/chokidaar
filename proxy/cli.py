@@ -6,11 +6,14 @@ Usage: python -m proxy.cli --upstream http://localhost:3000 [--port 8080]
 """
 import argparse
 import os
+import sys
 
 from proxy.config import DEFAULT_MODE, MODES, Settings
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8080
+# Where scripts/build_exe.ps1 puts the trained model inside the executable.
+BUNDLED_MODEL = os.path.join("models", "model.joblib")
 
 
 def _port(value: str) -> int:
@@ -53,14 +56,25 @@ def parse_args(argv=None) -> argparse.Namespace:
     return args
 
 
+def bundled_model_path():
+    """The model packed into the executable, or None when not running frozen."""
+    if not getattr(sys, "frozen", False):
+        return None
+    return os.path.join(sys._MEIPASS, BUNDLED_MODEL)
+
+
 def configure_env(args: argparse.Namespace, environ=None) -> None:
     """Set UPSTREAM_URL, MODE and, when given, LOG_DB for proxy.config and
-    proxy.logstore to read."""
+    proxy.logstore to read. In the executable, CHOKIDAAR_MODEL defaults to the
+    bundled model so it is not retrained on every start."""
     environ = os.environ if environ is None else environ
     environ["UPSTREAM_URL"] = args.upstream
     environ["MODE"] = args.mode
     if args.log_db:
         environ["LOG_DB"] = args.log_db
+    model = bundled_model_path()
+    if model and not environ.get("CHOKIDAAR_MODEL", "").strip():
+        environ["CHOKIDAAR_MODEL"] = model
 
 
 def main(argv=None) -> None:
