@@ -254,3 +254,40 @@ def test_empty_log_does_not_ask_the_model(tmp_path):
 def test_unusable_answer_raises(store):
     with pytest.raises(SuggestError):
         run(store, FakeClient("sorry"), benign=BENIGN)
+
+
+from proxy.suggest import build_parser, main  # noqa: E402
+
+
+def test_cli_defaults_and_flags():
+    args = build_parser().parse_args([])
+    assert (args.limit, args.dry_run) == (200, False)
+    args = build_parser().parse_args(["--limit", "5", "--dry-run"])
+    assert (args.limit, args.dry_run) == (5, True)
+
+
+@pytest.mark.parametrize("value", ["0", "-3", "many"])
+def test_cli_refuses_a_bad_limit(value):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["--limit", value])
+
+
+def test_cli_saves_and_reports(store, capsys):
+    bad = {"pattern": "(unclosed", "attack_type": "xss"}
+    assert main([], client=FakeClient(json.dumps([GOOD, bad])), store=store) == 0
+    out = capsys.readouterr().out
+    assert "Read 2 blocked/flagged requests in 2 groups." in out
+    assert "Saved 1 proposal(s):" in out and "#1 [sqli] zz-attack-marker" in out
+    assert "Rejected 1 proposal(s):" in out and "does not compile" in out
+    assert len(store.proposals()) == 1
+
+
+def test_cli_dry_run_reports_without_saving(store, capsys):
+    assert main(["--dry-run"], client=FakeClient(json.dumps([GOOD])), store=store) == 0
+    assert "Would save 1 proposal(s):" in capsys.readouterr().out
+    assert store.proposals() == []
+
+
+def test_cli_reports_model_errors(store, capsys):
+    assert main([], client=FakeClient("not json"), store=store) == 1
+    assert capsys.readouterr().err.startswith("error: the model did not answer")

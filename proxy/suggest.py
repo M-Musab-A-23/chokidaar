@@ -8,15 +8,18 @@ str`). The default client talks to a local Ollama server; tests use FakeClient.
 
 Run with: python -m proxy.suggest [--limit N] [--dry-run]
 """
+import argparse
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
 import httpx
 
+from proxy.logstore import LogStore
 from proxy.rules import SHORT_TYPES, Rule, scan
 
 DEFAULT_URL = "http://localhost:11434"
@@ -256,3 +259,60 @@ def run(store, client: ModelClient, limit: int = DEFAULT_LIMIT, dry_run: bool = 
         else:
             summary.saved.append((new_id, clean))
     return summary
+
+
+def _limit(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a whole number: {value!r}") from None
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return number
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m proxy.suggest",
+        description="Ask a language model for new rules based on recent blocked and "
+                    "flagged requests, and save the valid ones as pending proposals.")
+    parser.add_argument("--limit", type=_limit, default=DEFAULT_LIMIT,
+                        help=f"how many recent blocked/flagged requests to read "
+                             f"(default {DEFAULT_LIMIT})")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="show what would be saved without writing anything")
+    return parser
+
+
+def report(summary: Summary, dry_run: bool) -> str:
+    lines = [f"Read {summary.rows} blocked/flagged requests in {summary.groups} groups."]
+    verb = "Would save" if dry_run else "Saved"
+    lines.append(f"{verb} {len(summary.saved)} proposal(s):")
+    for new_id, p in summary.saved:
+        label = "" if new_id is None else f"#{new_id} "
+        lines.append(f"  {label}[{p['attack_type']}] {p['pattern']}  - {p['rationale']}")
+    if summary.duplicates:
+        lines.append(f"Skipped {len(summary.duplicates)} duplicate(s):")
+        lines.extend(f"  [{p['attack_type']}] {p['pattern']}" for p in summary.duplicates)
+    if summary.rejected:
+        lines.append(f"Rejected {len(summary.rejected)} proposal(s):")
+        for p, why in summary.rejected:
+            shown = p.get("pattern") if isinstance(p, dict) else p
+            lines.append(f"  {shown!r}: {why}")
+    return "\n".join(lines)
+
+
+def main(argv=None, client: ModelClient = None, store=None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        summary = run(store or LogStore(), client or OllamaClient(),
+                      limit=args.limit, dry_run=args.dry_run)
+    except SuggestError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(report(summary, args.dry_run))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
