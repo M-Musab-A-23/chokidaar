@@ -88,12 +88,25 @@ class LogStore:
                 " rule_id, ml_score, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
             return cursor.lastrowid
 
-    def recent(self, limit: int = 50) -> list:
-        """The newest requests first, as dicts."""
+    def recent(self, limit: int = 50, decision: str = None, ip: str = None) -> list:
+        """The newest requests first, as dicts, optionally only those with one
+        decision and/or from one IP."""
+        if decision is not None and decision not in DECISIONS:
+            raise ValueError(f"decision must be one of {', '.join(DECISIONS)}, got {decision!r}")
+        where, params = [], []
+        if decision is not None:
+            where.append("decision = ?")
+            params.append(decision)
+        if ip is not None:
+            where.append("ip = ?")
+            params.append(ip)
+        sql = "SELECT * FROM requests"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(max(0, int(limit)))
         with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM requests ORDER BY id DESC LIMIT ?",
-                                (max(0, int(limit)),))
-            return [dict(r) for r in rows]
+            return [dict(r) for r in conn.execute(sql, params)]
 
     def counts(self) -> dict:
         """Number of requests per decision; every decision is present, even at 0."""
