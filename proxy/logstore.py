@@ -127,6 +127,17 @@ class LogStore:
                 " GROUP BY ip ORDER BY blocks DESC, ip LIMIT ?", (max(0, int(limit)),))
             return [(r["ip"], r["blocks"]) for r in rows]
 
+    def hourly(self, since: datetime) -> dict:
+        """{'YYYY-MM-DDTHH': (requests, blocks)} per UTC hour for requests at or
+        after `since`; hours without requests are left out."""
+        start = since.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT substr(ts, 1, 13) AS hour, COUNT(*) AS requests,"
+                " SUM(decision = 'block') AS blocks FROM requests"
+                " WHERE ts >= ? GROUP BY hour ORDER BY hour", (start,))
+            return {r["hour"]: (r["requests"], r["blocks"]) for r in rows}
+
     def blocked_and_flagged(self, limit: int = 200) -> list:
         """The newest blocked or flagged requests first, as dicts."""
         with self.connect() as conn:

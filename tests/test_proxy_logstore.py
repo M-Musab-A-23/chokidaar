@@ -1,6 +1,7 @@
 import hashlib
 import os
 import sqlite3
+from datetime import datetime, timezone
 
 import pytest
 
@@ -136,6 +137,23 @@ def test_recent_filters_by_decision_and_ip(store):
     assert [r["path"] for r in store.recent(ip="203.0.113.9")] == ["/d", "/c"]
     assert [r["path"] for r in store.recent(decision="block", ip="198.51.100.1")] == ["/b"]
     assert [r["path"] for r in store.recent(1, decision="block")] == ["/c"]
+
+
+def test_hourly_counts_requests_and_blocks_per_utc_hour(store):
+    def at(ts, decision):
+        store.add_request(method="GET", path="/", query="", body=b"",
+                          decision=decision, ts=ts)
+    at("2026-11-10T08:59:59.999+00:00", "block")   # before `since`
+    at("2026-11-10T09:00:00.000+00:00", "allow")
+    at("2026-11-10T09:30:00.000+00:00", "block")
+    at("2026-11-10T09:45:00.000+00:00", "flagged")
+    at("2026-11-10T11:05:00.000+00:00", "allow")
+    since = datetime(2026, 11, 10, 9, tzinfo=timezone.utc)
+    assert store.hourly(since) == {"2026-11-10T09": (3, 1), "2026-11-10T11": (1, 0)}
+
+
+def test_hourly_on_an_empty_log(store):
+    assert store.hourly(datetime(2026, 1, 1, tzinfo=timezone.utc)) == {}
 
 
 def test_recent_refuses_an_unknown_decision(store):
