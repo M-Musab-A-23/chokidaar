@@ -12,14 +12,20 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
 import httpx
 
+from proxy.rules import SHORT_TYPES, Rule, scan
+
 DEFAULT_URL = "http://localhost:11434"
 DEFAULT_MODEL = "llama3.1"
 MODEL_TIMEOUT = httpx.Timeout(120.0, connect=5.0)
-ATTACK_TYPES = ("sqli", "xss", "traversal", "cmdi")
+ATTACK_TYPES = tuple(SHORT_TYPES)
+MIN_PATTERN_LENGTH = 4
+BENIGN_PATH = Path(__file__).resolve().parent.parent / "tests" / "attacks" / "payloads.json"
+REQUEST_DEFAULTS = {"method": "GET", "path": "/", "query": "", "headers": {}, "body": ""}
 # Keep the prompt small: the biggest groups, a few examples each, each cut short.
 MAX_GROUPS = 20
 EXAMPLES_PER_GROUP = 3
@@ -165,3 +171,41 @@ def parse_proposals(answer: str) -> list:
     if not isinstance(data, list):
         raise SuggestError(f"the model did not answer with a JSON list: {_clip(answer)!r}")
     return data
+
+
+def benign_payloads(path=BENIGN_PATH) -> list:
+    """Every benign payload in payloads.json, as full requests."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SuggestError(f"cannot read benign payloads from {path}: {exc}") from exc
+    return [{**REQUEST_DEFAULTS, **payload}
+            for name, groups in data.items() if not name.startswith("_")
+            for payload in groups["benign"]]
+
+
+def validate(proposal, benign: list) -> str:
+    """Why the proposal cannot be used, or None if it is fine."""
+    if not isinstance(proposal, dict):
+        return "not an object"
+    pattern, attack_type = proposal.get("pattern"), proposal.get("attack_type")
+    if not isinstance(pattern, str) or not pattern:
+        return "pattern is missing"
+    if attack_type not in ATTACK_TYPES:
+        return f"attack_type must be one of {', '.join(ATTACK_TYPES)}, got {attack_type!r}"
+    if not isinstance(proposal.get("rationale", ""), str):
+        return "rationale is not text"
+    if len(pattern) < MIN_PATTERN_LENGTH:
+        return f"pattern is shorter than {MIN_PATTERN_LENGTH} characters"
+    try:
+        compiled = re.compile(pattern, re.IGNORECASE)
+    except re.error as exc:
+        return f"pattern does not compile: {exc}"
+    if compiled.search(""):
+        return "pattern matches the empty string"
+    rule = Rule("proposal", SHORT_TYPES[attack_type], pattern, "a proposed pattern")
+    for payload in benign:
+        hits = scan(payload, [rule])
+        if hits:
+            return f"pattern matches a benign payload: {hits[0].matched!r} in the {hits[0].location}"
+    return None
