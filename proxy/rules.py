@@ -21,6 +21,13 @@ ATTACK_NAMES = {
     "path_traversal": "path traversal (an attempt to read files outside the website)",
     "command_injection": "command injection (an attempt to run commands on the server)",
 }
+# The short attack types used by rule proposals (see proxy/suggest.py).
+SHORT_TYPES = {
+    "sqli": "sql_injection",
+    "xss": "xss",
+    "traversal": "path_traversal",
+    "cmdi": "command_injection",
+}
 
 # Shell commands an attacker typically chains onto a parameter to see if it runs.
 _COMMANDS = (

@@ -123,3 +123,58 @@ def test_parse_proposals_empty_list():
 def test_parse_proposals_rejects_anything_else(answer):
     with pytest.raises(SuggestError):
         parse_proposals(answer)
+
+
+from proxy.suggest import ATTACK_TYPES, benign_payloads, validate  # noqa: E402
+
+BENIGN = benign_payloads()
+
+
+def _proposal(pattern=r"\bunion\s+all\s+select\b", attack_type="sqli", rationale="r"):
+    return {"pattern": pattern, "attack_type": attack_type, "rationale": rationale}
+
+
+def test_attack_types():
+    assert ATTACK_TYPES == ("sqli", "xss", "traversal", "cmdi")
+
+
+def test_benign_payloads_are_full_requests():
+    assert len(BENIGN) > 10
+    assert all(set(p) >= {"method", "path", "query", "headers", "body"} for p in BENIGN)
+    assert {"query": "q=O'Reilly books"}.items() <= next(
+        p for p in BENIGN if p["query"] == "q=O'Reilly books").items()
+
+
+def test_missing_benign_file_is_an_error(tmp_path):
+    with pytest.raises(SuggestError):
+        benign_payloads(tmp_path / "nope.json")
+
+
+@pytest.mark.parametrize("attack_type", ATTACK_TYPES)
+def test_a_good_proposal_passes(attack_type):
+    assert validate(_proposal(r"zz-attack-marker-\d+", attack_type), BENIGN) is None
+
+
+@pytest.mark.parametrize("proposal, why", [
+    ("not a dict", "not an object"),
+    ({"attack_type": "sqli"}, "pattern is missing"),
+    (_proposal(pattern=""), "pattern is missing"),
+    (_proposal(pattern=42), "pattern is missing"),
+    (_proposal(attack_type="sql_injection"), "attack_type must be one of"),
+    (_proposal(attack_type=None), "attack_type must be one of"),
+    (_proposal(rationale=["x"]), "rationale is not text"),
+    (_proposal(pattern="a.b"), "shorter than 4"),
+    (_proposal(pattern="(unclosed"), "does not compile"),
+    (_proposal(pattern="(?:zzzz)?"), "matches the empty string"),
+    (_proposal(pattern="x*y*z*"), "matches the empty string"),
+    (_proposal(pattern=r"o'reilly"), "matches a benign payload"),
+    (_proposal(pattern=r"\bselect\b"), "matches a benign payload"),
+    (_proposal(pattern="^GET$"), "matches a benign payload"),
+])
+def test_bad_proposals_are_refused_with_a_reason(proposal, why):
+    assert why in validate(proposal, BENIGN)
+
+
+def test_benign_check_sees_url_decoded_text():
+    benign = [{**BENIGN[0], "query": "q=hello%20world"}]
+    assert "benign" in validate(_proposal(pattern="hello world", attack_type="xss"), benign)
