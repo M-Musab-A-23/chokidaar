@@ -166,3 +166,98 @@ Each request also produces one JSON line on the `chokidaar.decisions` logger:
 | `SUGGEST_URL`, `SUGGEST_MODEL` | suggestions | `http://localhost:11434`, `llama3.1` |
 
 Proxy: port 8080. Dashboard: 8081, bound to `127.0.0.1` in Compose.
+
+## 5. How to work in this repository
+
+- **Branches:** branch off `main`, one branch per feature (`feat/...`, `fix/...`, `docs/...`). Never push to `main`; it is protected.
+- **Commits:** many small commits, one logical change each, with a short imperative message ("Add risk score per IP to the log store").
+- **Pull requests:** one per feature branch. The `test` check (pytest) and CodeQL must be green. Merge with **Rebase and merge** so every commit stays on `main`.
+- **Tests:** run `pytest -q` before every commit. Every new behaviour gets a test. Network and model calls are faked in tests (`tests/proxy_fakes.py`, `FakeClient` in `proxy/suggest.py`).
+- **Never commit** `data/raw/`, `models/*.joblib`, `.env`, `*.db`, `logs/`, `build/`, `dist/` or `*.spec`. They are in `.gitignore`.
+- **Security rules that are already tested and must stay true:**
+  - Request bodies are never stored, only their SHA-256.
+  - Block responses are `text/plain` with `nosniff`.
+  - Values from the log are attacker-controlled: the dashboard inserts them with `textContent` or `setAttribute` only, never `innerHTML`, and loads nothing from other sites.
+  - The dashboard does not start without `ADMIN_TOKEN`.
+  - Hop-by-hop headers are not forwarded; upstream responses are passed back unchanged.
+- **Line endings:** on Windows run `git config --global core.autocrlf input` once, so files stay LF (the Docker build needs this).
+
+## 6. Open work on the web track
+
+Ordered by value. Each item names the files involved and what "done" means.
+
+1. **Verify Docker end to end.** The Dockerfile and Compose file have never been built.
+   - Run `docker compose up --build` with `ADMIN_TOKEN` set; fix anything that fails.
+   - Done when: Juice Shop loads through `http://localhost:8080`, `curl "http://localhost:8080/rest/products/search?q='%20OR%201=1--"` returns `403`, and the dashboard on `http://localhost:8081` shows the block.
+   - Add a CI job that runs `docker build .` on pull requests.
+
+2. **Live attack tests against Juice Shop.** `tests/attacks/payloads.json` is only checked against the rules in-process.
+   - Add `tests/attacks/test_live.py` that sends every payload through the running proxy, skipped unless `CHOKIDAAR_LIVE_URL` is set.
+   - Done when: every malicious payload gets `403`, every benign one gets the app's own status, and a short results table is printed.
+
+3. **Risk score per IP and per endpoint** (planned for the dashboard, not built).
+   - `LogStore`: `ip_risk(limit)` and `endpoint_risk(limit)` returning requests, blocks, flagged, mean `ml_score` and a 0-100 risk score (for example blocked and flagged share weighted by recency).
+   - Dashboard: `GET /api/risk/ips`, `GET /api/risk/endpoints`, and two tables on the page.
+   - Done when: tests cover the scoring and the endpoints, and values are rendered as text.
+
+4. **Approve rules without a restart.** Approved rules load only at proxy startup.
+   - Option: the proxy re-reads approved rules every N seconds, or on a signal file written by the dashboard after an approval.
+   - Done when: an approved rule blocks a matching request without restarting the proxy, with a test.
+
+5. **Dashboard usability.**
+   - Pagination for recent requests, and a search on path and query.
+   - CSV export of filtered requests (`GET /api/requests.csv`).
+   - A button that runs the rule suggestion job (`proxy.suggest.run`) with `--dry-run` preview, shown only if a model server is configured.
+
+6. **Proxy hardening.**
+   - Rate limiting per IP (for example N requests per minute, `429` above it), logged as a new decision type. This needs a schema change: add the new value to the `decision` check in `proxy/logstore.py` and handle it on the dashboard.
+   - Optional trusted proxies: `TRUSTED_PROXIES` env var listing addresses whose `X-Forwarded-For` may be used for the logged IP.
+   - WebSocket pass-through (currently not proxied).
+   - Streaming large request and response bodies instead of buffering them in memory.
+
+7. **TLS in Compose.** Add an optional Caddy or nginx service in front of the proxy and dashboard, with a self-signed certificate for local use, and document it in `README.md`.
+
+8. **Demo script.** `docs/demo.md`: start the stack, send a normal request, an SQL injection, an XSS and a path traversal, open the dashboard, run `python -m proxy.suggest`, approve a suggestion, restart, show the new rule blocking.
+
+Coordinate with the detection track before:
+- changing the `predict()` input or output, `top_features` shapes, or `CHOKIDAAR_THRESHOLD`;
+- changing which request parts reach the classifier (`proxy/extract.py`), or the 64 KiB body limit;
+- shipping a different model in the Docker image or the executable (for example one trained with `python -m ml.train --csic`).
+
+## 7. Running everything locally
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+pytest -q
+
+# terminal 1: a test app
+python -m http.server 3000
+
+# terminal 2: the proxy
+$env:UPSTREAM_URL="http://localhost:3000"; $env:LOG_DB="logs\chokidaar.db"
+python -m proxy.cli --upstream http://localhost:3000 --port 8080
+
+# terminal 3: the dashboard
+$env:ADMIN_TOKEN="changeme"; $env:LOG_DB="logs\chokidaar.db"
+python -m dashboard
+```
+
+Open `http://localhost:8080` (normal page) and `http://localhost:8080/?id=1' OR 1=1 --` (blocked), then `http://localhost:8081` with the token `changeme`.
+
+Optional:
+
+```powershell
+python -m ml.train            # save models/model.joblib (trained on generated data)
+python -m ml.train --csic     # also train on CSIC 2010 (files in data\raw\)
+python -m ml.evaluate_csic    # reproduce the results in docs/evaluation.md
+python -m proxy.suggest --dry-run   # needs a local Ollama server
+```
+
+## 8. Where to read next
+
+- `docs/architecture.md`: request flow diagram and design decisions.
+- `docs/threat-model.md`: scope and risk matrix.
+- `docs/evaluation.md`: detection results.
+- `proxy/README.md`, `dashboard/README.md`, `ml/README.md`: details per folder.
